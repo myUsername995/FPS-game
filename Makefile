@@ -39,7 +39,7 @@ all: editor raycast server
 # -------- editor --------
 editor: editor.exe
 
-mapEditor.exe: editor.cpp $(TIME_SRC)
+editor.exe: editor.cpp $(TIME_SRC)
 	$(CXX) $(CXXFLAGS) -o $@ $^ \
 	$(COMMON_INCLUDES) \
 	$(COMMON_LIBS)
@@ -57,7 +57,7 @@ raycast.exe: raycast.cpp $(TIME_SRC)
 # -------- server --------
 server: server.exe
 
-raycastServer.exe: server.cpp
+server.exe: server.cpp
 	$(CXX) $(CXXFLAGS) -o $@ $^ \
 	$(COMMON_INCLUDES) \
 	$(ENET_INCLUDES) \

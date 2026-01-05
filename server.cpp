@@ -65,8 +65,8 @@ bool readMapData(std::string fileName, int** worldMap, sprite** sprites, uint32_
     for (uint32_t i = 0; i < numSprites; i++) {
         sprite curSprite = (*sprites)[i];
 
-        in.read((char*)&curSprite.x, sizeof(float));
         in.read((char*)&curSprite.y, sizeof(float));
+        in.read((char*)&curSprite.x, sizeof(float));
         in.read((char*)&curSprite.texture, sizeof(int32_t));
 
         (*sprites)[i] = curSprite;

@@ -289,8 +289,8 @@ int main(int argc, char* argv[]){
     float gridHeight = 100;
 
     // The amount of grids in the world space
-    int gridX = 100;
-    int gridY = 100;
+    int gridX = 24;
+    int gridY = 24;
 
     float worldWidth = gridWidth * gridX;
     float worldHeight = gridHeight * gridY;
