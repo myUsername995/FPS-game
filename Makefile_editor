@@ -1,0 +1,19 @@
+# Compiler
+CXX = g++
+CXXFLAGS = -O3 -g
+
+TARGET = mapEditor.exe
+
+SRC = mapEditor.cpp \
+	  C:/Files/Cpp_files/silly/Grapher/libraries/src/time.cpp
+
+# ENet include path
+INCLUDES = -I"C:/Files/.vscode/include" \
+		   -I"C:/Files/Cpp_files/silly/Grapher/libraries/header"
+
+# Library directories and libraries
+LIBS = -L"C:/Files/.vscode/lib" \
+       -lSDL3 -lSDL3_ttf -lSDL3_image\
+
+$(TARGET): $(SRC)
+	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SRC) $(INCLUDES) $(LIBS)
