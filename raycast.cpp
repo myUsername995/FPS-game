@@ -202,7 +202,7 @@ bool connectToServer(ENetHost** client, ENetPeer** server, gameState& state){
     }
 
     // Wait to receive the packets:
-    // 1. playerID, 2. map dimensions, 3. map data
+    // 1. playerID, 2. map dimensions, 3. map data 4. sprites length 5. sprites data
 
     bool receivedPacket = false;
     int numPacketsReceived = 0;
