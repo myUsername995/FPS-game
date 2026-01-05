@@ -523,6 +523,12 @@ int main(int argc, char* argv[]){
                             }
                             break;
                         }
+                        case SDLK_TAB: {
+                            // The user changed his mind and doesn't want to type in a file anymore
+                            if (saveFile) saveFile = false;
+                            if (loadFile) loadFile = false;
+                            break;
+                        }
                     }
                     break;
                 }

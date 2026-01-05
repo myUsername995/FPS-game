@@ -12,7 +12,7 @@
 #include <algorithm>
 #include <thread>
 #include <vector>
-#include "C:/Files/Cpp_files/silly/Grapher/libraries/header/time.hpp"
+#include "time.hpp"
 
 int WINDOW_HEIGHT = 800;
 int WINDOW_WIDTH = 800;

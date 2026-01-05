@@ -18,6 +18,21 @@ ON CLIENT INPUT:
 #include <string>
 #include <cmath>
 
+enum PacketID : uint8_t {
+    PACKET_PLAYER_ID,
+    PACKET_PLAYER_USERNAME,
+
+    PACKET_MAP_METADATA,
+    PACKET_MAP_DATA,
+    PACKET_SPRITE_METADATA,
+    PACKET_SPRITE_DATA,
+};
+
+// The data we will send over the network
+struct PacketData {
+    PacketID id;
+    void* data;
+};
 
 // Used for sending data over the network
 struct Network_player {
@@ -113,6 +128,23 @@ std::string getRandomName(std::vector<std::string>& randNames, int& numNames){
     randNames.erase(randNames.begin() + rand);
 
     return result;
+}
+
+// Just append the ID to the start of the pointer
+ENetPacket* createPacket(void* data, size_t size, PacketID id) {
+    uint8_t packetID = static_cast<uint8_t>(id);
+
+    // Create vector with 1 + size bytes
+    std::vector<uint8_t> bytes(size+1);
+    bytes[0] = id;
+    // Append data
+    if (size > 0 && data)
+        bytes.insert(bytes.end(),
+                     reinterpret_cast<uint8_t*>(data),
+                     reinterpret_cast<uint8_t*>(data) + size);
+
+    // Create ENet packet
+    return enet_packet_create(bytes.data(), bytes.size(), ENET_PACKET_FLAG_RELIABLE);
 }
 
 int main(int argc, char* argv[]){
