@@ -13,19 +13,14 @@
 #include <thread>
 #include <vector>
 #include "time.hpp"
+#include "networking.hpp"
+#include "wallRender.hpp"
 
 int WINDOW_HEIGHT = 800;
 int WINDOW_WIDTH = 800;
 
 constexpr float PI = 3.14159;
-constexpr const char* serverIP = "192.168.0.99";
-
-constexpr int MAX_WINDOW_HEIGHT = 1017;
-constexpr int MAX_WINDOW_WIDTH = 1920;
-
-bool run = true;
-
-Uint32 buffer[MAX_WINDOW_HEIGHT][MAX_WINDOW_WIDTH]; // y-coordinate first because it works per scanline
+std::string serverIP = "192.168.0.99";
 
 class Vector {
     public:
@@ -110,27 +105,11 @@ Vector operator-(SDL_FPoint p1, SDL_FPoint p2){
     return Vector(p1.x - p2.x, p1.y - p2.y);
 }
 
-// Used for sending data over the network
-struct Network_player {
-    // Metadata
-    int playerID;
-
-    // Player data
-    SDL_FPoint pos;
-    float lookDirX, lookDirY;
-    float cameraX, cameraY;
-
-    // Animation related dta
-    bool isMoving;
-    int animationStep;
-};
-
 struct Sprite {
     SDL_FPoint pos;
     int texture;
 
-    // Show other players as sprites
-    bool isPlayer = false;
+    int isPlayer;
     int index = 0;
 };
 
@@ -139,338 +118,54 @@ struct gameState {
     std::vector<Player> otherPlayers;
 
     // The server sends the map to each client on start-up
-    int mapWidth, mapHeight;
     std::vector<std::vector<int>> map;
-    std::vector<Sprite> sprites;        // Sprites are also part of the world
+    std::vector<Sprite> sprites;
+    int numSprites, numPlayerSprites;
+};
+
+struct Lines {
+    SDL_FPoint p1;
+    SDL_FPoint p2;
+    int texture;
 };
 
 struct Texture {
-    std::vector<Uint32> texels;
+    SDL_Surface* texture;
     int width, height;
 };
 
-// Textures of the sprites
-std::vector<Texture> texture;
-int numSprites = 0;
-int numPlayerSprites = 0;
-
-// Store the player textures in a separate array
+// Textures of the sprites and walls
+std::vector<Texture> wallTextures;
+std::vector<Texture> spriteTextures;
 std::array<Texture, 8> playerTextures;
 std::array<std::array<Texture, 8>, 4> playerRunTextures;
+Texture skyTexture;
+
+int numWallTextures = 0;
+int numSpriteTextures = 0;
+int numPlayerTextures = 0;
 
 std::vector<double> ZBuffer;
 
-// Arrays used to sort the sprites
-std::vector<int> spriteOrder;
-std::vector<double> spriteDistance;
-
-// Networking functions
-
-// Connect to the server and send the first packet (metadata, just username for now) and also receive a packet containing our playerID
-bool connectToServer(ENetHost** client, ENetPeer** server, gameState& state){
-    *client = enet_host_create(NULL, 1, 2, 0, 0);
-    if (*client == NULL){
-        std::cerr << "Couldn't set up client.\n";
-        return false;
-    }
-
-    ENetAddress serverAddress;
-    ENetEvent event;
-    enet_address_set_host(&serverAddress, serverIP);
-    serverAddress.port = 1234;
-
-    *server = enet_host_connect(*client, &serverAddress, 2, 0);
-    if (*server == NULL){
-        std::cerr << "Couldn't find the server.\n";
-        return false;
-    }
-
-    // Try to connect for 5 seconds
-    bool connected = false;
-    while (enet_host_service(*client, &event, 5000) > 0 &&
-        event.type == ENET_EVENT_TYPE_CONNECT){
-
-        std::cerr << "Succesfully connected to the server.\n";
-        connected = true;
-        break;
-    }
-
-    if (!connected){
-        std::cerr << "Couldn't connect to server.\n";
-        enet_peer_reset(*server);
-        return false;
-    }
-
-    // Wait to receive the packets:
-    // 1. playerID, 2. map dimensions, 3. map data 4. sprites length 5. sprites data
-
-    bool receivedPacket = false;
-    int numPacketsReceived = 0;
-    while (numPacketsReceived < 5){
-        bool receivedPacket = false;
-        while (enet_host_service(*client, &event, 5000) > 0){
-            if (event.type == ENET_EVENT_TYPE_RECEIVE){
-                receivedPacket = true;
-
-                // Set the playerID
-                if (numPacketsReceived == 0){
-                    state.player.playerID = *(int*)event.packet->data;
-                }
-                // Dimensions
-                else if (numPacketsReceived == 1){
-                    struct Dimensions {
-                        int width, height;
-                    };
-
-                    Dimensions mapDimensions;
-                    memcpy(&mapDimensions, event.packet->data, event.packet->dataLength);
-
-                    state.mapWidth = mapDimensions.width;
-                    state.mapHeight = mapDimensions.height;
-
-                    state.map.resize(mapDimensions.width);
-                    for (int i = 0; i < mapDimensions.width; i++){
-                        state.map[i].resize(mapDimensions.height);
-                    }
-                }
-                // Map data
-                else if (numPacketsReceived == 2){
-                    int width = state.map.size();
-                    int height = state.map[0].size();
-
-                    int* arr = new int[width * height];
-
-                    memcpy(arr, event.packet->data, event.packet->dataLength);
-
-                    for (int i = 0; i < width * height; i++){
-                        int x = i % width;
-                        int y = i / width;
-
-                        state.map[x][y] = arr[i];
-                    }
-
-                    delete[] arr;
-                }
-                // Sprites metadata
-                else if (numPacketsReceived == 3){
-                    memcpy(&numSprites, event.packet->data, event.packet->dataLength);
-                    state.sprites.resize(numSprites);
-                }
-                // Sprites data
-                else if (numPacketsReceived == 4){
-                    struct network_sprite {
-                        float x, y;
-                        int texture;
-                    };
-
-                    network_sprite* network_sprites = new network_sprite[state.sprites.size()];
-                    memcpy(network_sprites, event.packet->data, event.packet->dataLength);
-
-                    for (int i = 0; i < state.sprites.size(); i++){
-                        state.sprites[i].pos = {network_sprites[i].x, network_sprites[i].y};
-                        state.sprites[i].texture = network_sprites[i].texture;
-                        state.sprites[i].isPlayer = false;
-                    }
-
-                    delete[] network_sprites;
-                }
-
-                enet_packet_destroy(event.packet);
-
-                numPacketsReceived++;
-                break;
-            }
-        }
-
-        if (!receivedPacket && numPacketsReceived == 0){
-            std::cerr << "Didn't receive the playerID from the server.\n";
-            return false;
-        }
-        if (!receivedPacket && numPacketsReceived == 1){
-            std::cerr << "Didn't receive the map dimensions from the server.\n";
-            return false;
-        }
-        if (!receivedPacket && numPacketsReceived == 2){
-            std::cerr << "Didn't receive the map data from the server.\n";
-            return false;
-        }
-        if (!receivedPacket && numPacketsReceived == 3){
-            std::cerr << "Didn't receive the sprites length data from the server.\n";
-            return false;
-        }
-        if (!receivedPacket && numPacketsReceived == 4){
-            std::cerr << "Didn't receive the sprites data from the server.\n";
-            return false;
-        }
-    }
-
-    return true;
-}
-
-void disconnectFromServer(ENetHost* client, ENetPeer* server){
-    // Disconnect from the server
-    std::cout << "Disconnecting...\n";
-    enet_peer_disconnect(server, 0);
-
-    ENetEvent event;
-
-    // Wait 5 second to disconnect
-    bool disconnected = false;
-    while (enet_host_service(client, &event, 5000) > 0){
-        if (event.type == ENET_EVENT_TYPE_DISCONNECT){
-            disconnected = true;
-            break;
-        }
-    }
-
-    if (!disconnected){
-        enet_peer_reset(server);
-    }
-
-    std::cout << "Disconnected from the server.\n";
-}
-
-void sendInputs(ENetHost* client, ENetPeer* server, const gameState& state){
-    // Create a struct instead of a class
-    Network_player p;
-    p.cameraX = state.player.camera.x;
-    p.cameraY = state.player.camera.y;
-    p.lookDirX = state.player.lookDir.x;
-    p.lookDirY = state.player.lookDir.y;
-    p.playerID = state.player.playerID;
-    p.pos = state.player.pos;
-    p.isMoving = state.player.isMoving;
-    p.animationStep = state.player.animationStep;
-
-    ENetPacket* packet = enet_packet_create(&p, sizeof(p), ENET_PACKET_FLAG_RELIABLE);
-
-    enet_peer_send(server, 0, packet);
-
-    enet_host_flush(client);
-}
-
-// This function will run on a separate thread
-void receiveInputs(ENetHost* client, ENetPeer* server, gameState& state){
-    while (run){
-        ENetEvent event;
-        while (enet_host_service(client, &event, 50) > 0){
-            if (event.type == ENET_EVENT_TYPE_DISCONNECT){
-                run = false;
-                std::cout << "Disconnected from the server.\n";
-                
-                return;
-            }
-            if (event.type == ENET_EVENT_TYPE_RECEIVE){
-                // The server sent an std::vector<Player>.data() array
-                size_t numPlayers = event.packet->dataLength / sizeof(Network_player);
-
-                std::vector<Network_player> network_otherPlayers;
-                network_otherPlayers.resize(numPlayers); // allocate space
-                state.otherPlayers.resize(numPlayers);
-
-                memcpy(network_otherPlayers.data(), event.packet->data, event.packet->dataLength);
-
-                // Remove our own player from the otherPlayers array
-                for (int i = 0; i < numPlayers; i++){
-                    if (network_otherPlayers[i].playerID == state.player.playerID){
-                        network_otherPlayers.erase(network_otherPlayers.begin() + i);
-                        break;
-                    }
-                }
-                numPlayers--;
-
-                // Copy into the actual otherPlayers array
-                for (int i = 0; i < numPlayers; i++){
-                    state.otherPlayers[i].camera = {network_otherPlayers[i].cameraX, network_otherPlayers[i].cameraY};
-                    state.otherPlayers[i].lookDir = {network_otherPlayers[i].lookDirX, network_otherPlayers[i].lookDirY};
-                    state.otherPlayers[i].playerID = network_otherPlayers[i].playerID;
-                    state.otherPlayers[i].pos = network_otherPlayers[i].pos;
-                    state.otherPlayers[i].isMoving = network_otherPlayers[i].isMoving;
-                    state.otherPlayers[i].animationStep = network_otherPlayers[i].animationStep;
-                }
-
-                state.sprites.resize(numSprites + numPlayers);
-                numPlayerSprites = numPlayers;
-                // Add sprites for the players
-                for (int i = 0; i < numPlayers; i++){
-                    Sprite newSprite;
-                    newSprite.texture = 11; // Player texture
-                    newSprite.pos = state.otherPlayers[i].pos;
-                    newSprite.index = i;
-                    newSprite.isPlayer = true;
-
-                    state.sprites[numSprites + i] = newSprite;
-                }
-
-                break;
-            }
-        }
-    }
-}
-
-// Loads an image into the textures array
-bool loadImage(int index, const std::string& path) {
-    SDL_Surface* surface = IMG_Load(path.c_str());
-    if (!surface){
-        std::cerr << "Couldn't load file: " << path << std::endl;
-        return false;
-    }
-
-    SDL_Surface* converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_ARGB8888);
-    SDL_DestroySurface(surface);
-    if (!converted){
-        std::cerr << "Couldn't convert file to ARGB8888: " << path << std::endl;
-        return false;
-    }
-
-    Texture tex;
-    tex.width = converted->w;
-    tex.height = converted->h;
-    tex.texels.resize(tex.width * tex.height);
-
-    Uint8* pixels = (Uint8*)converted->pixels;
-    int pitch = converted->pitch; // bytes per row
-
-    for (int y = 0; y < tex.height; y++) {
-        Uint32* srcRow = (Uint32*)(pixels + y * pitch);
-        for (int x = 0; x < tex.width; x++) {
-            tex.texels[y * tex.width + x] = srcRow[x];
-        }
-    }
-
-    SDL_DestroySurface(converted);
-
-    if (index >= texture.size()) {
-        texture.resize(index + 1); // ensure vector is large enough
-    }
-
-    texture[index] = std::move(tex);
-    return true;
-}
+enum textureType {
+    TEXTURE_WALL,
+    TEXTURE_SPRITE,
+    TEXTURE_PLAYER,
+    TEXTURE_SKY
+};
 
 // Helper function to parse the player.png picture into the playerTextures array
-void parsePlayerTextures(){
-    SDL_Surface* surface = IMG_Load("pics/player.png");
+void parsePlayerTextures(const std::string& path){
+    SDL_Surface* surface = IMG_Load(path.c_str());
     if (!surface) {
         SDL_Log("IMG_Load failed: %s", SDL_GetError());
         return;
     }
 
-    SDL_Surface* converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_ARGB8888);
-    if (!converted) {
-        SDL_Log("SDL_ConvertSurface failed: %s", SDL_GetError());
-        SDL_DestroySurface(surface);
-        return;
-    }
-
-    SDL_DestroySurface(surface);
-    surface = converted;
-
     // Every picture is 64 by 64 pixels, we want the first row of 8 pictures. Additionally there is a 1 pixel gap between each picture
-
     // Go through 5 rows -> 1st row: standing player, 1st-5th rows: running player (animation)
     for (int j = 0; j < 5; j++){
-        int startY = j * 65;
+        int y = j * 65;
         for (int i = 0; i < 8; i++){
             // Account for the one pixel gap
             int x = i * 65;
@@ -479,26 +174,59 @@ void parsePlayerTextures(){
                 playerTextures[i].width = 64;
                 playerTextures[i].height = 64;
 
-                playerTextures[i].texels.resize(64 * 64);
-
-                for (int y = 0; y < 64; y++){
-                    Uint32* row = (Uint32*)((Uint8*)surface->pixels + (startY + y) * surface->pitch) + x;
-                    memcpy(&playerTextures[i].texels[y * 64], row, 64 * sizeof(Uint32));
-                }
+                // Where to copy it from, from the image of images
+                SDL_Rect srcRect = {x, y, 64, 64};
+                SDL_BlitSurface(surface, &srcRect, playerTextures[i].texture, NULL);
             }
             else {
                 playerRunTextures[j-1][i].width = 64;
                 playerRunTextures[j-1][i].height = 64;
 
-                playerRunTextures[j-1][i].texels.resize(64 * 64);
-
-                for (int y = 0; y < 64; y++){
-                    Uint32* row = (Uint32*)((Uint8*)surface->pixels + (startY + y) * surface->pitch) + x;
-                    memcpy(&playerRunTextures[j-1][i].texels[y * 64], row, 64 * sizeof(Uint32));
-                }
+                // Where to copy it from, from the image of images
+                SDL_Rect srcRect = {x, y, 64, 64};
+                SDL_BlitSurface(surface, &srcRect, playerRunTextures[j-1][i].texture, NULL);
             }
         }
     }
+}
+
+// Loads an image into different arrays
+bool loadImage(textureType type, const std::string& path, int id = 0) {
+    SDL_Surface* surface = IMG_Load(path.c_str());
+    if (!surface){
+        std::cerr << "Couldn't load file: " << path << std::endl;
+        return false;
+    }
+
+    Texture tex;
+    tex.width = surface->w;
+    tex.height = surface->h;
+    tex.texture = surface;
+
+    if (type == TEXTURE_WALL){
+        if (id >= wallTextures.size()){
+            wallTextures.resize(id);
+        }
+        wallTextures[id] = tex;
+    }
+    else if (type == TEXTURE_SPRITE){
+        if (id >= spriteTextures.size()){
+            spriteTextures.resize(id);
+        }
+        spriteTextures[id] = tex;
+    }
+    else if (type == TEXTURE_PLAYER){
+        parsePlayerTextures(path);
+    }
+    else if (type == TEXTURE_SKY){
+        skyTexture = tex;
+    }
+    else {
+        std::cout << "Didn't input type.\n";
+        return false;
+    }
+
+    return true;
 }
 
 // Sort algorithm
@@ -521,21 +249,35 @@ double dotProduct(Vector v1, Vector v2){
     return v2.x * v1.x + v2.y * v1.y;
 }
 
-Uint32 darkenColor(Uint32 color, double factor){
-    Uint32 a = (color >> 24) & 0xFF;  // Alpha
-    Uint8 r = (color >> 16) & 0xFF;   // Red
-    Uint8 g = (color >> 8) & 0xFF;    // Green
-    Uint8 b = color & 0xFF;           // Blue
+void DarkenSurface(SDL_Surface* surface){
+    if (SDL_MUSTLOCK(surface))
+        SDL_LockSurface(surface);
 
-    // Darken by some factor
-    r *= factor;
-    g *= factor;
-    b *= factor;
+    Uint8* pixels = static_cast<Uint8*>(surface->pixels);
+    SDL_PixelFormat format = surface->format;
+    int bpp = SDL_BYTESPERPIXEL(format);
 
-    // Recombine ARGB
-    color = (a << 24) | (r << 16) | (g << 8) | b;
+    for (int y = 0; y < surface->h; ++y) {
+        for (int x = 0; x < surface->w; ++x) {
+            Uint8* p = pixels + y * surface->pitch + x * bpp;
 
-    return color;
+            Uint32 pixel;
+            memcpy(&pixel, p, bpp);
+
+            Uint8 r, g, b, a;
+            SDL_GetRGBA(pixel, SDL_GetPixelFormatDetails(format), NULL, &r, &g, &b, &a);
+
+            r >>= 1;
+            g >>= 1;
+            b >>= 1;
+
+            Uint32 newPixel = SDL_MapRGBA(SDL_GetPixelFormatDetails(format), NULL, r, g, b, a);
+            memcpy(p, &newPixel, bpp);
+        }
+    }
+
+    if (SDL_MUSTLOCK(surface))
+        SDL_UnlockSurface(surface);
 }
 
 void renderWalls(SDL_Renderer* renderer, const gameState& state){
@@ -637,8 +379,8 @@ void renderWalls(SDL_Renderer* renderer, const gameState& state){
         
         // Texturing calculations
         int texNum = state.map[map.x][map.y] - 1; // 1 subtracted from it so that texture 0 can be used!
-        int curTexWidth = texture[texNum].width;
-        int curTexHeight = texture[texNum].height;
+        int curTexWidth = wallTextures[texNum].width;
+        int curTexHeight = wallTextures[texNum].height;
 
         // Calculate value of wallX
         double wallX; // Where exactly the wall was hit
@@ -659,12 +401,6 @@ void renderWalls(SDL_Renderer* renderer, const gameState& state){
             // Cast the texture coordinate to integer, and mask with (texHeight - 1) in case of overflow
             int texY = (int)texPos & (curTexHeight - 1);
             texPos += step;
-            Uint32 color = texture[texNum].texels[curTexHeight * texY + texX];
-            // Make color darker for y-sides: R, G and B byte
-            if (side == 1) {
-                color = darkenColor(color, 1.0/2.0);
-            }
-            buffer[y][x] = color;
 
             ZBuffer[x] = perpWallDist;
         }
@@ -672,11 +408,8 @@ void renderWalls(SDL_Renderer* renderer, const gameState& state){
 }
 
 void renderSky(const gameState& state){
-    int skyTexture = 12;
-    const Texture& sky = texture[skyTexture];
-
-    int texW = sky.width;
-    int texH = sky.height;
+    int texW = skyTexture.width;
+    int texH = skyTexture.height;
 
     int horizon = WINDOW_HEIGHT / 2;
     for (int x = 0; x < WINDOW_WIDTH; x++) {
@@ -696,8 +429,6 @@ void renderSky(const gameState& state){
         int texX = (int)(u * texW) % texW;
         for (int y = 0; y < horizon; y++) {
             int texY = (y * texH) / horizon;
-
-            buffer[y][x] = sky.texels[texY * texW + texX];
         }
     }
 }
@@ -742,11 +473,11 @@ void renderFloorAndCeiling(SDL_Renderer* renderer, const gameState& state){
         int cellY = (int)(floorY);
 
         // get the texture coordinate from the fractional part
-        int floorWidth = texture[floorTexture].width;
-        int floorHeight = texture[floorTexture].height;
+        int floorWidth = wallTextures[floorTexture].width;
+        int floorHeight = wallTextures[floorTexture].height;
 
-        int ceilWidth = texture[ceilingTexture].width;
-        int ceilHeight = texture[ceilingTexture].height;
+        int ceilWidth = wallTextures[ceilingTexture].width;
+        int ceilHeight = wallTextures[ceilingTexture].height;
 
         // Fractional world coordinate
         float fx = std::fmod(std::fabs(floorX), 1.0f);
@@ -766,15 +497,15 @@ void renderFloorAndCeiling(SDL_Renderer* renderer, const gameState& state){
         // Draw the pixel
         Uint32 color;
 
-        // Ceiling (symmetrical, at screenHeight - y - 1 instead of y)
-        color = texture[ceilingTexture].texels[ceilWidth * tyCeil + txCeil];
-        color = darkenColor(color, 1.0/2.0);
-        //buffer[WINDOW_HEIGHT - y - 1][x] = color;
+        // // Ceiling (symmetrical, at screenHeight - y - 1 instead of y)
+        // color = texture[ceilingTexture].texels[ceilWidth * tyCeil + txCeil];
+        // color = darkenColor(color, 1.0/2.0);
+        // //buffer[WINDOW_HEIGHT - y - 1][x] = color;
 
-        // Floor
-        color = texture[floorTexture].texels[floorWidth * tyFloor + txFloor];
-        color = darkenColor(color, 1.0/2.0);
-        buffer[y][x] = color;
+        // // Floor
+        // color = texture[floorTexture].texels[floorWidth * tyFloor + txFloor];
+        // color = darkenColor(color, 1.0/2.0);
+        // buffer[y][x] = color;
       }
     }
 }
@@ -783,7 +514,11 @@ void renderSprites(SDL_Renderer* renderer, const gameState& state){
     Player player = state.player;
     std::vector<Player> otherPlayers = state.otherPlayers;
 
-    int fullNumSprites = numSprites + numPlayerSprites;
+    // Arrays used to sort the sprites
+    std::vector<int> spriteOrder;
+    std::vector<double> spriteDistance;
+
+    int fullNumSprites = state.numSprites + state.numPlayerSprites;
     spriteOrder.resize(fullNumSprites);
     spriteDistance.resize(fullNumSprites);
 
@@ -798,11 +533,11 @@ void renderSprites(SDL_Renderer* renderer, const gameState& state){
     sortSprites(spriteOrder, spriteDistance, fullNumSprites);
 
     // After sorting the sprites, do the projection and draw them
-    for(int i = 0; i < fullNumSprites; i++){
+    for(int i = 0; i < numSpriteTextures; i++){
         int spriteIndex = spriteOrder[i];
         int spriteTexWidth, spriteTexHeight;
 
-        std::vector<Uint32>* textureArr; // The current texture
+        SDL_Surface** texture; // The current texture
         SDL_FPoint spritePos; // The position of the sprite
         int invisColor; // The player sprite and other sprites use different colors (cuz I pulled them from different sources)
 
@@ -828,13 +563,13 @@ void renderSprites(SDL_Renderer* renderer, const gameState& state){
             if (otherPlayer.isMoving){
                 int step = otherPlayer.animationStep;
 
-                textureArr = &playerRunTextures[step][playerTexture].texels;
+                *texture = playerRunTextures[step][playerTexture].texture,
                 spriteTexWidth  = playerRunTextures[step][playerTexture].width;
                 spriteTexHeight = playerRunTextures[step][playerTexture].height;
             }
             // Standing texture
             else {
-                textureArr = &playerTextures[playerTexture].texels;
+                *texture = playerTextures[playerTexture].texture;
                 spriteTexWidth  = playerTextures[playerTexture].width;
                 spriteTexHeight = playerTextures[playerTexture].height;
             }
@@ -846,9 +581,9 @@ void renderSprites(SDL_Renderer* renderer, const gameState& state){
         }
         else {
             int tex = state.sprites[spriteIndex].texture;
-            textureArr = &texture[tex].texels;
-            spriteTexWidth  = texture[tex].width;
-            spriteTexHeight = texture[tex].height;
+            *texture = wallTextures[tex].texture;
+            spriteTexWidth  = wallTextures[tex].width;
+            spriteTexHeight = wallTextures[tex].height;
             spritePos = state.sprites[spriteIndex].pos;
 
             // Black
@@ -901,10 +636,10 @@ void renderSprites(SDL_Renderer* renderer, const gameState& state){
                 for (int y = drawStartY; y < drawEndY; y++){
                     int d = y - WINDOW_HEIGHT / 2 + spriteHeight / 2;
                     int texY = ((d * spriteTexHeight) / spriteHeight);
-                    Uint32 color = (*textureArr)[spriteTexWidth * texY + texX]; // Get current color from the texture
-                    if ((color & 0x00FFFFFF) != invisColor){
-                        buffer[y][stripe] = color; // Paint pixel if it isn't black, black is the invisible color
-                    }
+                    // Uint32 color = (*textureArr)[spriteTexWidth * texY + texX]; // Get current color from the texture
+                    // if ((color & 0x00FFFFFF) != invisColor){
+                    //     buffer[y][stripe] = color; // Paint pixel if it isn't black, black is the invisible color
+                    // }
                 }
             }
         }
@@ -941,54 +676,40 @@ int main(int argc, char* argv[]){
 
     SDL_CreateWindowAndRenderer("Multiplayer FPS game", WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_RESIZABLE, &window, &renderer);
 
-    SDL_Texture* tex = SDL_CreateTexture(
-        renderer,
-        SDL_PIXELFORMAT_ARGB8888,
-        SDL_TEXTUREACCESS_STREAMING,
-        MAX_WINDOW_WIDTH,
-        MAX_WINDOW_HEIGHT
-    );
-
     double FOV = 90.0;
-
     gameState state;
+    state.player = Player({5, 5}, Vector(1, 1), FOV * (PI / 180.0));
 
-    Player player = Player({5, 5}, Vector(1, 1), FOV * (PI / 180.0));
-    state.player = player;
-
-    ENetHost* client;
-    ENetPeer* server;
-    // Connect to the server
-    if (!connectToServer(&client, &server, state)) return 0;
-    player = state.player;
-    std::cout << "Our ID: " << player.playerID << std::endl;
+    Client connection;
+    if (!connection.connectToServer(state, serverIP)) return 0;
+    std::cout << "Our ID: " << state.player.playerID << std::endl;
 
     // On connection, send our player info immediately to the other clients
-    sendInputs(client, server, state);
+    connection.sendData(state);
 
     ZBuffer.resize(WINDOW_WIDTH);
-    texture.resize(12);
 
     // Wall textures
-    loadImage(0, "pics/eagle.png");
-    loadImage(1, "pics/redbrick.png");
-    loadImage(2, "pics/purplestone.png");
-    loadImage(3, "pics/greystone.png");
-    loadImage(4, "pics/bluestone.png");
-    loadImage(5, "pics/mossy.png");
-    loadImage(6, "pics/wood.png");
-    loadImage(7, "pics/colorstone.png");
-    loadImage(8, "pics/sky.jpg");
+    loadImage(TEXTURE_WALL, "pics/eagle.png", 0);
+    loadImage(TEXTURE_WALL, "pics/redbrick.png", 1);
+    loadImage(TEXTURE_WALL, "pics/purplestone.png", 2);
+    loadImage(TEXTURE_WALL, "pics/greystone.png", 3);
+    loadImage(TEXTURE_WALL, "pics/bluestone.png", 4);
+    loadImage(TEXTURE_WALL, "pics/mossy.png", 5);
+    loadImage(TEXTURE_WALL, "pics/wood.png", 6);
+    loadImage(TEXTURE_WALL, "pics/colorstone.png", 7);
+    loadImage(TEXTURE_WALL, "pics/sky.jpg", 8);
     
     // Sprite textures
-    loadImage(9, "pics/barrel.png");
-    loadImage(10, "pics/pillar.png");
-    loadImage(11, "pics/greenlight.png");
+    loadImage(TEXTURE_SPRITE, "pics/barrel.png", 0);
+    loadImage(TEXTURE_SPRITE, "pics/pillar.png", 1);
+    loadImage(TEXTURE_SPRITE, "pics/greenlight.png", 2);
 
     // Sky
-    loadImage(12, "pics/doomSky.png");
+    loadImage(TEXTURE_SKY, "pics/doomSky.png", 0);
 
-    parsePlayerTextures();
+    // Player
+    loadImage(TEXTURE_PLAYER, "pics/player.png", 0);
 
     TTF_Font* font = TTF_OpenFont("Roboto_Condensed-Black.ttf", 20);
 
@@ -1007,18 +728,12 @@ int main(int argc, char* argv[]){
     SDL_FPoint start_pan = {0, 0};
 
     Clk clock;
-
+    std::atomic<bool> run;
+    run.store(true, std::memory_order_release);
     // The thread where we will receive updates from the server
-    std::thread receiveThread(receiveInputs, client, server, std::ref(state));
+    std::thread receiveThread(&Client::receiveData, &connection, std::ref(state), std::ref(run));
     while (run){
         clock.begin();
-
-        // Clear the buffer
-        for (int y = 0; y < WINDOW_HEIGHT; y++){
-            for(int x = 0; x < WINDOW_WIDTH; x++){
-                buffer[y][x] = 0;
-            }
-        }
 
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
@@ -1065,8 +780,8 @@ int main(int argc, char* argv[]){
         const bool* keyboardState = SDL_GetKeyboardState(NULL);
 
         double speed = playerSpeed * dt;
-        SDL_FPoint pos = player.pos;
-        Vector dir = player.lookDir;
+        SDL_FPoint pos = state.player.pos;
+        Vector dir = state.player.lookDir;
         Vector velocity(0, 0);
         int numKeysPressed = 0;
 
@@ -1074,29 +789,29 @@ int main(int argc, char* argv[]){
         if (keyboardState[SDL_SCANCODE_W]){
             numKeysPressed++;
             // Move forward if no wall
-            if (state.map[int(pos.x + dir.x * speed)][int(pos.y)] == false) velocity.x += player.lookDir.x * speed;
-            if (state.map[int(pos.x)][int(pos.y + dir.y * speed)] == false) velocity.y += player.lookDir.y * speed;
+            if (state.map[int(pos.x + dir.x * speed)][int(pos.y)] == false) velocity.x += state.player.lookDir.x * speed;
+            if (state.map[int(pos.x)][int(pos.y + dir.y * speed)] == false) velocity.y += state.player.lookDir.y * speed;
         }
 
         // Backward
         if (keyboardState[SDL_SCANCODE_S]){
             numKeysPressed++;
-            if (state.map[int(pos.x - dir.x * speed)][int(pos.y)] == false) velocity.x -= player.lookDir.x * speed;
-            if (state.map[int(pos.x)][int(pos.y - dir.y * speed)] == false) velocity.y -= player.lookDir.y * speed;
+            if (state.map[int(pos.x - dir.x * speed)][int(pos.y)] == false) velocity.x -= state.player.lookDir.x * speed;
+            if (state.map[int(pos.x)][int(pos.y - dir.y * speed)] == false) velocity.y -= state.player.lookDir.y * speed;
         }
 
         // Strafe right
         if (keyboardState[SDL_SCANCODE_A]){
             numKeysPressed++;
-            if (state.map[int(pos.x - dir.y * speed)][int(pos.y)] == false) velocity.x -= player.lookDir.y * speed;
-            if (state.map[int(pos.x)][int(pos.y + dir.x * speed)] == false) velocity.y += player.lookDir.x * speed;
+            if (state.map[int(pos.x - dir.y * speed)][int(pos.y)] == false) velocity.x -= state.player.lookDir.y * speed;
+            if (state.map[int(pos.x)][int(pos.y + dir.x * speed)] == false) velocity.y += state.player.lookDir.x * speed;
         }
     
         if (keyboardState[SDL_SCANCODE_D]){
             numKeysPressed++;
             // Strafe left
-            if (state.map[int(pos.x + dir.y * speed)][int(pos.y)] == false) velocity.x += player.lookDir.y * speed;
-            if (state.map[int(pos.x)][int(pos.y - dir.x * speed)] == false) velocity.y -= player.lookDir.x * speed;
+            if (state.map[int(pos.x + dir.y * speed)][int(pos.y)] == false) velocity.x += state.player.lookDir.y * speed;
+            if (state.map[int(pos.x)][int(pos.y - dir.x * speed)] == false) velocity.y -= state.player.lookDir.x * speed;
         }
 
         double adjustment = 1.0;
@@ -1104,8 +819,8 @@ int main(int argc, char* argv[]){
             adjustment = 1.0 / sqrt(2);
         }
 
-        player.pos.x += velocity.x * adjustment;
-        player.pos.y += velocity.y * adjustment;
+        state.player.pos.x += velocity.x * adjustment;
+        state.player.pos.y += velocity.y * adjustment;
 
         // Get the mouse state
         float x, y;
@@ -1117,44 +832,30 @@ int main(int argc, char* argv[]){
             if (changeX == 0) cameraChanged = false;
             start_pan = {x, y};
 
-            Vector dir = player.lookDir;
-            Vector plane = player.camera;
-
             // Both camera direction and camera plane must be rotated
             double rotSpeed = rotationSpeed * changeX;
 
-            dir.rotate(rotSpeed);
-            plane.rotate(rotSpeed);
-
-            player.lookDir = dir;
-            player.camera = plane;
+            state.player.lookDir.rotate(rotSpeed);
+            state.player.camera.rotate(rotSpeed);
         }
 
+        // Only send packets if something changed
+        if (cameraChanged || state.player.isMoving){
+            // Send the new state of the player to the server
+            connection.sendData(state);
+        }
+
+        // Determine if the player is moving or not
         if (numKeysPressed > 0){
             animationAccumulate = fmod(animationAccumulate + animationSpeed, 4);
 
-            player.isMoving = true;
-            player.animationStep = (int)animationAccumulate;
+            state.player.isMoving = true;
+            state.player.animationStep = (int)animationAccumulate;
         }
         else {
-            if (state.player.isMoving){
-                player.isMoving = false;
-                player.animationStep = 0;
-                animationAccumulate = 0;
-
-                // Send our input, because it wouldn't get sent otherwise because we didn't move. But we should still send it to update
-                // the client that we stopped moving
-                state.player = player;
-                sendInputs(client, server, state);
-            }
-        }
-
-        state.player = player;
-
-        // Only send packets if something changed
-        if (cameraChanged || numKeysPressed > 0){
-            // Send the new state of the player to the server
-            sendInputs(client, server, state);
+            state.player.isMoving = false;
+            state.player.animationStep = 0;
+            animationAccumulate = 0;
         }
 
         // The rendering process
@@ -1162,17 +863,6 @@ int main(int argc, char* argv[]){
         renderFloorAndCeiling(renderer, state);
         renderWalls(renderer, state);
         renderSprites(renderer, state);
-
-        SDL_Rect updateRect = {0, 0, WINDOW_WIDTH, WINDOW_HEIGHT};
-        SDL_UpdateTexture(
-            tex,
-            &updateRect,
-            buffer,
-            MAX_WINDOW_WIDTH * sizeof(uint32_t)
-        );
-
-        SDL_FRect texRect = {0, 0, (float)WINDOW_WIDTH, (float)WINDOW_HEIGHT};
-        SDL_RenderTexture(renderer, tex, &texRect, &texRect);
 
         SDL_FRect rect = {10, 10, 0, 0};
         renderText(renderer, font, rect, "FPS: " + std::to_string(FPS), {255, 255, 255, 255});
@@ -1193,9 +883,7 @@ int main(int argc, char* argv[]){
     receiveThread.join();
 
     // Disconnect from the server
-    disconnectFromServer(client, server);
-
-    enet_host_destroy(client);
+    connection.disconnectFromServer();
 
     return 0;
 }
