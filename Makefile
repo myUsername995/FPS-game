@@ -11,6 +11,10 @@ COMMON_INCLUDES = \
 	-I"C:/Files/.vscode/myLibraries/include" \
 	-I"C:/Files/.vscode/myLibraries/libraries/header"
 
+RAYCAST_INCLUDES = \
+	-I"./libraries/header" \
+	-I"C:/Files/.vscode/myLibraries"
+
 # =========================
 # Common libraries
 # =========================
@@ -28,6 +32,9 @@ ENET_LIBS     = -L"./enet-1.3.18" -lenet64 -lws2_32 -lwinmm
 # Shared source
 # =========================
 TIME_SRC = C:/Files/.vscode/myLibraries/libraries/src/time.cpp
+NETWORKING_SRC = ./libraries/src/networking.cpp
+RENDERING_SRC = ./libraries/src/wallRender.cpp C:/Files/.vscode/myLibraries/libraries/src/GPU.cpp \
+				C:/Files/.vscode/myLibraries/glad/glad.c
 
 # =========================
 # Targets
@@ -47,10 +54,11 @@ editor.exe: editor.cpp $(TIME_SRC)
 # -------- raycast --------
 raycast: raycast.exe
 
-raycast.exe: raycast.cpp $(TIME_SRC)
+raycast.exe: raycast.cpp $(TIME_SRC) $(NETWORKING_SRC) $(RENDERING_SRC)
 	$(CXX) $(CXXFLAGS) -o $@ $^ \
 	$(COMMON_INCLUDES) \
 	$(ENET_INCLUDES) \
+	$(RAYCAST_INCLUDES) \
 	$(COMMON_LIBS) \
 	$(ENET_LIBS)
 

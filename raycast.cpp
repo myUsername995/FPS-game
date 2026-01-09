@@ -13,115 +13,15 @@
 #include <thread>
 #include <vector>
 #include "time.hpp"
-#include "networking.hpp"
-#include "wallRender.hpp"
+#include "networking.hpp"           // Abstracts away the communicating with the server part
+#include "wallRender.hpp"           // Abstracts how the walls are rendered on the GPU
+#include "gameState.hpp"            // Our gameState struct, stored in an .hpp to make sure we don't include it multiple times
 
 int WINDOW_HEIGHT = 800;
 int WINDOW_WIDTH = 800;
 
 constexpr float PI = 3.14159;
 std::string serverIP = "192.168.0.99";
-
-class Vector {
-    public:
-        Vector(){}
-        Vector(float x, float y){
-           Vector::x = x;
-           Vector::y = y; 
-        }
-        ~Vector(){}
-
-        double length(){
-            return std::sqrt(Vector::x * Vector::x + Vector::y * Vector::y);
-        }
-
-        Vector normalize(){
-            double length = Vector::length();
-
-            return Vector(x / length, y / length);
-        }
-
-        Vector rotate90CW(){
-            Vector newVec(Vector::y, -Vector::x);
-
-            return newVec;
-        }
-
-        void rotate(double angle){
-            double oldX = x;
-            double oldY = y;
-
-            x = oldX * cos(angle) - oldY * sin(angle);
-            y = oldX * sin(angle) + oldY * cos(angle);
-        }
-
-
-        std::string to_string() const {
-            return "(" + std::to_string(x) + ", " + std::to_string(y) + ")";
-        }
-
-        float x, y;
-};
-
-class Player {
-    public:
-        Player(SDL_FPoint pos, Vector lookDir, Vector camera){
-            Player::pos = pos;
-            Player::lookDir = lookDir.normalize();
-            Player::camera = camera.normalize();
-        }
-        Player(SDL_FPoint pos, Vector lookDir, double FOVRadians){
-            Player::pos = pos;
-            Player::lookDir = lookDir.normalize();
-
-            // Convert the FOV to the right plane vector
-            double planeLen = tan(FOVRadians / 2.0f);
-
-            // Camera plane
-            Vector perp = Player::lookDir.rotate90CW();
-            Player::camera = Vector(perp.x * planeLen, perp.y * planeLen);
-        }
-        Player(){}
-        ~Player(){}
-
-        // Decided by the server
-        int playerID;
-
-        // Player data
-        SDL_FPoint pos;
-        Vector lookDir;
-        Vector camera;
-
-        // Use this to animate players
-        bool isMoving = false;
-        int animationStep = 0;
-};
-
-Vector operator-(Vector v1, Vector v2){
-    return Vector(v1.x - v2.x, v1.y - v2.y);
-}
-
-Vector operator-(SDL_FPoint p1, SDL_FPoint p2){
-    return Vector(p1.x - p2.x, p1.y - p2.y);
-}
-
-struct Sprite {
-    SDL_FPoint pos;
-    int texture;
-
-    int isPlayer;
-    int index = 0;
-};
-
-struct gameState {
-    Player player;
-    std::vector<Player> otherPlayers;
-
-    // The server sends the map to each client on start-up
-    std::vector<std::vector<int>> map;
-    std::vector<Sprite> sprites;
-    int numSprites, numPlayerSprites;
-};
 
 struct Lines {
     SDL_FPoint p1;
@@ -205,13 +105,13 @@ bool loadImage(textureType type, const std::string& path, int id = 0) {
 
     if (type == TEXTURE_WALL){
         if (id >= wallTextures.size()){
-            wallTextures.resize(id);
+            wallTextures.resize(id+1);
         }
         wallTextures[id] = tex;
     }
     else if (type == TEXTURE_SPRITE){
         if (id >= spriteTextures.size()){
-            spriteTextures.resize(id);
+            spriteTextures.resize(id+1);
         }
         spriteTextures[id] = tex;
     }
@@ -245,8 +145,31 @@ void sortSprites(std::vector<int>& order, std::vector<double>& dist, int amount)
     }
 }
 
-double dotProduct(Vector v1, Vector v2){
-    return v2.x * v1.x + v2.y * v1.y;
+// Create the lineMap from the legacy cubes map (FOR TESTING)
+void cubeToLines(gameState& state){
+    int width = state.map.size();
+    int height = state.map[0].size();
+
+    // 4 lines -> 2 offsets for the 2 points, stored in x,y order
+    int lineOffsets[4][4] = {{0, 0, 1, 0}, {1, 0, 1, 1}, {1, 1, 0, 1}, {0, 1, 0, 0}};
+    // For each cube create 4 lines
+    for (int x = 0; x < width; x++){
+        for (int y = 0; y < height; y++){
+            if (state.map[x][y] == 0) continue;
+
+            for (int i = 0; i < 4; i++){
+                Line newLine;
+                newLine.p1.x = x + lineOffsets[i][0];
+                newLine.p1.y = y + lineOffsets[i][1];
+                newLine.p2.x = x + lineOffsets[i][2];
+                newLine.p2.y = y + lineOffsets[i][3];
+                newLine.texture = state.map[x][y];
+
+                state.lineMap.push_back(newLine);
+            }
+        }
+    }
+
 }
 
 void DarkenSurface(SDL_Surface* surface){
@@ -546,7 +469,10 @@ void renderSprites(SDL_Renderer* renderer, const gameState& state){
             Player otherPlayer = state.otherPlayers[state.sprites[spriteIndex].index];
 
             Vector spriteDir = otherPlayer.lookDir.normalize();
-            Vector toCamera  = (player.pos - otherPlayer.pos).normalize();
+            Vector toCamera;
+            toCamera.x = player.pos.x - otherPlayer.pos.x;
+            toCamera.y = player.pos.y - otherPlayer.pos.y;
+            toCamera.normalize();
 
             double angle = atan2(
                 spriteDir.x * toCamera.y - spriteDir.y * toCamera.x,
@@ -671,10 +597,8 @@ int main(int argc, char* argv[]){
     }
     atexit(enet_deinitialize);
 
-    SDL_Renderer* renderer;
-    SDL_Window* window;
-
-    SDL_CreateWindowAndRenderer("Multiplayer FPS game", WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_RESIZABLE, &window, &renderer);
+    SDL_Window* window = SDL_CreateWindow("Multiplayer FPS game", WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+    if (initializeGPU(window, WINDOW_WIDTH, WINDOW_HEIGHT) == -1) return 0;
 
     double FOV = 90.0;
     gameState state;
@@ -683,6 +607,17 @@ int main(int argc, char* argv[]){
     Client connection;
     if (!connection.connectToServer(state, serverIP)) return 0;
     std::cout << "Our ID: " << state.player.playerID << std::endl;
+
+    // Convert our map representation to be made up of lines instead of cubes
+    cubeToLines(state);
+    if (initShaders(state.lineMap, WINDOW_WIDTH, WINDOW_HEIGHT) == -1) return 0;
+
+    // for (int i = 0; i < state.map.size(); i++){
+    //     std::cout << "\n";
+    //     for (int j = 0; j < state.map[0].size(); j++){
+    //         std::cout << state.map[i][j];
+    //     }
+    // }
 
     // On connection, send our player info immediately to the other clients
     connection.sendData(state);
@@ -706,14 +641,14 @@ int main(int argc, char* argv[]){
     loadImage(TEXTURE_SPRITE, "pics/greenlight.png", 2);
 
     // Sky
-    loadImage(TEXTURE_SKY, "pics/doomSky.png", 0);
+    loadImage(TEXTURE_SKY, "pics/doomSky.png");
 
     // Player
-    loadImage(TEXTURE_PLAYER, "pics/player.png", 0);
+    loadImage(TEXTURE_PLAYER, "pics/player.png");
 
     TTF_Font* font = TTF_OpenFont("Roboto_Condensed-Black.ttf", 20);
 
-    double FPSCap = 60;
+    double FPSCap = 1000;
     double FPS = 0;
     double dt = 0;
 
@@ -734,9 +669,7 @@ int main(int argc, char* argv[]){
     std::thread receiveThread(&Client::receiveData, &connection, std::ref(state), std::ref(run));
     while (run){
         clock.begin();
-
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderClear(renderer);
+        GPUClearScreen();
 
         while (SDL_PollEvent(&event)){
             switch (event.type){
@@ -750,6 +683,7 @@ int main(int argc, char* argv[]){
 
                     ZBuffer.resize(WINDOW_WIDTH);
 
+                    resizeShaders(WINDOW_WIDTH, WINDOW_HEIGHT);
                     break;
                 }
                 case SDL_EVENT_MOUSE_BUTTON_DOWN: {
@@ -859,18 +793,33 @@ int main(int argc, char* argv[]){
         }
 
         // The rendering process
-        renderSky(state);
-        renderFloorAndCeiling(renderer, state);
-        renderWalls(renderer, state);
-        renderSprites(renderer, state);
+        // renderSky(state);
+        // renderFloorAndCeiling(renderer, state);
+        // renderWalls(renderer, state);
+        // renderSprites(renderer, state);
 
-        SDL_FRect rect = {10, 10, 0, 0};
-        renderText(renderer, font, rect, "FPS: " + std::to_string(FPS), {255, 255, 255, 255});
+        float width = state.map.size();
+        float height = state.map[0].size();
+
+        renderWallz(state.player.lookDir, state.player.camera, state.player.pos);
+
+        // // Render the line representation of the map
+        // float mapWidth = state.map.size();
+        // float mapHeight = state.map[0].size();
+        // for (int i = 0; i < state.lineMap.size(); i++){
+        //     Line curLine = state.lineMap[i];
+        //     SDL_FPoint newP1 = {curLine.p1.x * WINDOW_WIDTH / mapWidth, curLine.p1.y * WINDOW_HEIGHT / mapHeight};
+        //     SDL_FPoint newP2 = {curLine.p2.x * WINDOW_WIDTH / mapWidth, curLine.p2.y * WINDOW_HEIGHT / mapHeight};
+
+        //     GPURenderLine(newP1, newP2, {0, 127, 255, 255});
+        // }
+
+        SDL_FRect rect = GPURenderText(font, "FPS: " + std::to_string(FPS), {10, 10}, {255, 255, 255, 255});
 
         rect.y += rect.h + 10;
-        renderText(renderer, font, rect, "Speed: " + std::to_string(playerSpeed), {255, 255, 255, 255});
+        rect = GPURenderText(font, "Speed: " + std::to_string(playerSpeed), {rect.x, rect.y}, {255, 255, 255, 255});
 
-        SDL_RenderPresent(renderer);
+        SDL_GL_SwapWindow(window);
 
         clock.end();
 
