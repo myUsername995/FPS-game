@@ -14,6 +14,15 @@ layout(std430, binding = 2) buffer texCoordsBuffer {
 layout(binding = 0, rgba8) writeonly uniform image2D outImage;  // Output image
 
 // UNIFORMS
+uniform sampler2D tex1;
+uniform sampler2D tex2;
+uniform sampler2D tex3;
+uniform sampler2D tex4;
+uniform sampler2D tex5;
+uniform sampler2D tex6;
+uniform sampler2D tex7;
+uniform sampler2D tex8;
+uniform sampler2D tex9;
 
 uniform vec2 lookDir;        // Look direction of our player (normalized)
 uniform vec2 camera;         // Camera plane vector
@@ -26,17 +35,17 @@ void main() {
     uint y = gl_GlobalInvocationID.y;
 
     if (x >= WINDOW_WIDTH || y >= WINDOW_HEIGHT){
-        imageStore(outImage, ivec2(int(x), int(y)), vec4(1, 1, 1, 1));
+        imageStore(outImage, ivec2(int(x), int(y)), vec4(0, 0, 0, 0));
         return;
     }
 
     vec2 wall = wallRanges[x];
     bool noCollision = wall.x == 0 && wall.y == 0;
 
-    // Check if the current pixel is a ceiling, either: 
-    // No collision: must be greater than WINDOW_HEIGHT / 2 (horizon)
-    // Collision: must be greater than the walls height
-    if ((noCollision && y < WINDOW_HEIGHT / 2) || (!noCollision && y < wall.y)){
+    // Check if the current pixel is a floor, either: 
+    // No collision: must be less than WINDOW_HEIGHT / 2 (horizon)
+    // Collision: must be less than the walls height
+    if ((noCollision && y > WINDOW_HEIGHT / 2) || (!noCollision && y > wall.x)){
         return;
     }
 
@@ -51,7 +60,7 @@ void main() {
     float rayDirX1 = lookDir.x + camera.x;
     float rayDirY1 = lookDir.y + camera.y;
 
-    float p = y - (WINDOW_HEIGHT / 2);
+    float p = (WINDOW_HEIGHT - y) - (WINDOW_HEIGHT / 2);
     float rowDistance = (WINDOW_HEIGHT / 2) / p;
 
     vec2 floorStep = vec2(rowDistance * (rayDirX1 - rayDirX0) / WINDOW_WIDTH,
@@ -62,11 +71,23 @@ void main() {
 
     floorPos += floorStep * float(x);
 
-    uint textureIdx = 5;
+    uint textureIdx = 3;
     vec2 texCoord = fract(floorPos);
     vec4 color;
 
     // SWITCH STATEMENT
+    switch (textureIdx){
+        case 1: color = texture(tex1, texCoord); break;
+        case 2: color = texture(tex2, texCoord); break;
+        case 3: color = texture(tex3, texCoord); break;
+        case 4: color = texture(tex4, texCoord); break;
+        case 5: color = texture(tex5, texCoord); break;
+        case 6: color = texture(tex6, texCoord); break;
+        case 7: color = texture(tex7, texCoord); break;
+        case 8: color = texture(tex8, texCoord); break;
+        case 9: color = texture(tex9, texCoord); break;
+        default: break;
+    }
 
     imageStore(outImage, ivec2(x, y), color);
 }

@@ -23,17 +23,6 @@ int WINDOW_WIDTH = 800;
 constexpr float PI = 3.14159;
 std::string serverIP = "192.168.0.99";
 
-struct Lines {
-    SDL_FPoint p1;
-    SDL_FPoint p2;
-    int texture;
-};
-
-struct Texture {
-    SDL_Surface* texture;
-    int width, height;
-};
-
 // Textures of the sprites and walls
 std::vector<Texture> wallTextures;
 std::vector<Texture> spriteTextures;
@@ -163,7 +152,7 @@ void cubeToLines(gameState& state){
                 newLine.p1.y = y + lineOffsets[i][1];
                 newLine.p2.x = x + lineOffsets[i][2];
                 newLine.p2.y = y + lineOffsets[i][3];
-                newLine.texture = state.map[x][y];
+                newLine.texture = state.map[x][y]+1;
 
                 state.lineMap.push_back(newLine);
             }
@@ -610,7 +599,6 @@ int main(int argc, char* argv[]){
 
     // Convert our map representation to be made up of lines instead of cubes
     cubeToLines(state);
-    if (initShaders(state.lineMap, WINDOW_WIDTH, WINDOW_HEIGHT) == -1) return 0;
 
     // for (int i = 0; i < state.map.size(); i++){
     //     std::cout << "\n";
@@ -645,6 +633,8 @@ int main(int argc, char* argv[]){
 
     // Player
     loadImage(TEXTURE_PLAYER, "pics/player.png");
+
+    if (initShaders(window, state.lineMap, wallTextures) == -1) return 0;
 
     TTF_Font* font = TTF_OpenFont("Roboto_Condensed-Black.ttf", 20);
 
@@ -683,7 +673,7 @@ int main(int argc, char* argv[]){
 
                     ZBuffer.resize(WINDOW_WIDTH);
 
-                    resizeShaders(WINDOW_WIDTH, WINDOW_HEIGHT);
+                    resizeShaders(window);
                     break;
                 }
                 case SDL_EVENT_MOUSE_BUTTON_DOWN: {
@@ -801,7 +791,7 @@ int main(int argc, char* argv[]){
         float width = state.map.size();
         float height = state.map[0].size();
 
-        renderWallz(state.player.lookDir, state.player.camera, state.player.pos);
+        renderWallz(window, state.player.lookDir, state.player.camera, state.player.pos);
 
         // // Render the line representation of the map
         // float mapWidth = state.map.size();

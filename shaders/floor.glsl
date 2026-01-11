@@ -13,32 +13,30 @@ layout(std430, binding = 2) buffer texCoordsBuffer {
 
 layout(binding = 0, rgba8) writeonly uniform image2D outImage;  // Output image
 
-uniform sampler2D testTex;
+// UNIFORMS
+
 uniform vec2 lookDir;        // Look direction of our player (normalized)
 uniform vec2 camera;         // Camera plane vector
 uniform vec2 playerPos;      // Position of the player
 uniform uint WINDOW_WIDTH;
 uniform uint WINDOW_HEIGHT;
-uniform uint texWidth;
-uniform uint texHeight;
 
 void main() {
     uint x = gl_GlobalInvocationID.x;
     uint y = gl_GlobalInvocationID.y;
 
     if (x >= WINDOW_WIDTH || y >= WINDOW_HEIGHT){
-        imageStore(outImage, ivec2(int(x), int(y)), vec4(1, 1, 1, 1));
+        imageStore(outImage, ivec2(int(x), int(y)), vec4(0, 0, 0, 0));
         return;
     }
 
     vec2 wall = wallRanges[x];
-    if (wall.x == 0 && wall.y == 0){
-        imageStore(outImage, ivec2(int(x), int(y)), vec4(1, 1, 1, 1));
-        return;
-    }
+    bool noCollision = wall.x == 0 && wall.y == 0;
 
-    // Check if the current pixel is a ceiling, if not then return
-    if (y > wall.x){
+    // Check if the current pixel is a floor, either: 
+    // No collision: must be less than WINDOW_HEIGHT / 2 (horizon)
+    // Collision: must be less than the walls height
+    if ((noCollision && y > WINDOW_HEIGHT / 2) || (!noCollision && y > wall.x)){
         return;
     }
 
@@ -64,6 +62,11 @@ void main() {
 
     floorPos += floorStep * float(x);
 
-    vec4 color = texture(testTex, fract(floorPos)); // fract() replaces floorX-floor(floorX)
+    uint textureIdx = 3;
+    vec2 texCoord = fract(floorPos);
+    vec4 color;
+
+    // SWITCH STATEMENT
+
     imageStore(outImage, ivec2(x, y), color);
 }

@@ -332,22 +332,22 @@ int main(int argc, char* argv[]){
     // Top
     for (int i = 0; i < gridX; i++){
         map[i][0].type = WALL;
-        map[i][0].wallTex = 9;
+        map[i][0].wallTex = 8;
     }
     // Left
     for (int i = 0; i < gridY; i++){
         map[0][i].type = WALL;
-        map[0][i].wallTex = 9;
+        map[0][i].wallTex = 8;
     }
     // Right
     for (int i = 0; i < gridY; i++){
         map[gridX-1][i].type = WALL;
-        map[gridX-1][i].wallTex = 9;
+        map[gridX-1][i].wallTex = 8;
     }
     // Bottom
     for (int i = 0; i < gridX; i++){
         map[i][gridY-1].type = WALL;
-        map[i][gridY-1].wallTex = 9;
+        map[i][gridY-1].wallTex = 8;
     }
 
     Clk clock;

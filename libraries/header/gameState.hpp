@@ -95,6 +95,11 @@ struct Line {
     int texture;
 };
 
+struct Texture {
+    SDL_Surface* texture;
+    int width, height;
+};
+
 struct gameState {
     Player player;
     std::vector<Player> otherPlayers;

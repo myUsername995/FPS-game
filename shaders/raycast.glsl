@@ -41,14 +41,26 @@ layout(std430, binding = 2) buffer texCoordsBuffer {
     vec4 texCoords[];
 };
 
+// The texture index for each line
+layout(std430, binding = 3) buffer textureLinesBuffer {
+    uint textureLines[];
+};
+
+// The output texture for each column
+layout(std430, binding = 4) buffer textureColumnsBuffer {
+    uint textureColumns[];
+};
+
 uniform uint numLines;       // Number of lines on the map
 uniform vec2 lookDir;        // Look direction of our player (normalized)
 uniform vec2 camera;         // Camera plane vector
 uniform vec2 playerPos;      // Position of the player
 uniform uint WINDOW_WIDTH;
 uniform uint WINDOW_HEIGHT;
-uniform uint texWidth;
-uniform uint texHeight;
+uniform float texWidth;
+uniform float texHeight;
+
+layout(binding = 0, rgba8) writeonly uniform image2D outImage;  // Output image
 
 void main() {
     uint x = gl_GlobalInvocationID.x;
@@ -86,7 +98,8 @@ void main() {
     
     // If no hit, just clear column (e.g., black)
     if (closestLineIndex == uint(-1)) {
-        wallRanges[x] = vec2(0, 800);
+        wallRanges[x] = vec2(0, 0);         // (0, 0) indicates no collision
+        textureColumns[x] = 0;
         return;
     }
 
@@ -109,6 +122,9 @@ void main() {
     uint yEnd   = uint(min(endDraw, float(WINDOW_HEIGHT - 1)));
 
     wallRanges[x] = vec2(yStart, yEnd);
+
+    uint curTexture = textureLines[closestLineIndex];
+    textureColumns[x] = curTexture;
 
     // Compute texture X coordinate (0..1) along the wall
     vec2 wallStart = lines[closestLineIndex * 2];
