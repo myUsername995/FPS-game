@@ -62,11 +62,9 @@ void main() {
 
     floorPos += floorStep * float(x);
 
-    uint textureIdx = 5;
+    uint textureIdx = 6;
     vec2 texCoord = fract(floorPos);
-    vec4 color;
-
-    // SWITCH STATEMENT
+    vec4 color = texture(textures[textureIdx], texCoord);
 
     imageStore(outImage, ivec2(x, y), color);
 }

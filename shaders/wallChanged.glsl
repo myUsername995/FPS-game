@@ -1,6 +1,6 @@
 #version 430 core 
 
-layout(local_size_x = 16, local_size_y = 16) in;
+layout(local_size_x = 256, local_size_y = 1) in;
 
 layout(std430, binding = 1) buffer wallRangesBuffer {
     vec2 wallRanges[];
@@ -19,19 +19,7 @@ layout(std430, binding = 4) readonly buffer textureColumnsBuffer {
 layout(binding = 0, rgba8) writeonly uniform image2D outImage;  // Output image
 
 // UNIFORMS
-uniform sampler2D tex1;
-uniform sampler2D tex2;
-uniform sampler2D tex3;
-uniform sampler2D tex4;
-uniform sampler2D tex5;
-uniform sampler2D tex6;
-uniform sampler2D tex7;
-uniform sampler2D tex8;
-uniform sampler2D tex9;
-
-uniform vec2 lookDir;        // Look direction of our player (normalized)
-uniform vec2 camera;         // Camera plane vector
-uniform vec2 playerPos;      // Position of the player
+uniform sampler2D textures[9];
 uniform uint WINDOW_WIDTH;
 uniform uint WINDOW_HEIGHT;
 uniform float texWidth;
@@ -39,9 +27,8 @@ uniform float texHeight;
 
 void main() {
     uint x = gl_GlobalInvocationID.x;
-    uint y = gl_GlobalInvocationID.y;
 
-    if (x >= WINDOW_WIDTH || y >= WINDOW_HEIGHT){
+    if (x >= WINDOW_WIDTH){
         return;
     }
 
@@ -52,49 +39,25 @@ void main() {
         return;
     }
 
-    // Check if the current point is a wall, if not then don't render anything
-    if (y > wall.y || y < wall.x){
-        return;
-    }
-
     float texX = texCoords[x].x;
     float stepX = texCoords[x].y;     // Unused
     float texY = texCoords[x].z;
     float stepY = texCoords[x].w;
 
-    // Floor texture mapping
-    float rayDirX0 = lookDir.x - camera.x;
-    float rayDirY0 = lookDir.y - camera.y;
-    float rayDirX1 = lookDir.x + camera.x;
-    float rayDirY1 = lookDir.y + camera.y;
-
     // The texture of the current column
-    uint textureIdx = textureColumns[x];
-    textureIdx -= 1;
+    uint textureIdx = 3;
 
-    texY += stepY * (wall.y - y);
+    for (int y = int(wall.x); y < int(wall.y); y++){
+        vec2 texCoord;
+        float normalizedX = texX / texWidth;
+        float normalizedY = texY / texHeight;
+        texCoord.x = clamp(normalizedX, 0.0, 1.0);
+        texCoord.y = clamp(normalizedY, 0.0, 1.0);
 
-    vec2 texCoord;
-    float normalizedX = texX / texWidth;
-    float normalizedY = texY / texHeight;
-    texCoord.x = clamp(normalizedX, 0.0, 1.0);
-    texCoord.y = clamp(normalizedY, 0.0, 1.0);
+        vec4 color = texture(textures[int(textureIdx-2)], texCoord);
 
-    vec4 color = vec4(0);
+        imageStore(outImage, ivec2(int(x), int(y)), color);
 
-    // SWITCH STATEMENT
-    switch (textureIdx){
-        case 1: color = texture(tex1, texCoord); break;
-        case 2: color = texture(tex2, texCoord); break;
-        case 3: color = texture(tex3, texCoord); break;
-        case 4: color = texture(tex4, texCoord); break;
-        case 5: color = texture(tex5, texCoord); break;
-        case 6: color = texture(tex6, texCoord); break;
-        case 7: color = texture(tex7, texCoord); break;
-        case 8: color = texture(tex8, texCoord); break;
-        case 9: color = texture(tex9, texCoord); break;
-        default: break;
+        texY += stepY;
     }
-
-    imageStore(outImage, ivec2(int(x), int(y)), color);
 }

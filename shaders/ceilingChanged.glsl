@@ -14,16 +14,7 @@ layout(std430, binding = 2) buffer texCoordsBuffer {
 layout(binding = 0, rgba8) writeonly uniform image2D outImage;  // Output image
 
 // UNIFORMS
-uniform sampler2D tex1;
-uniform sampler2D tex2;
-uniform sampler2D tex3;
-uniform sampler2D tex4;
-uniform sampler2D tex5;
-uniform sampler2D tex6;
-uniform sampler2D tex7;
-uniform sampler2D tex8;
-uniform sampler2D tex9;
-
+uniform sampler2D textures[9];
 uniform vec2 lookDir;        // Look direction of our player (normalized)
 uniform vec2 camera;         // Camera plane vector
 uniform vec2 playerPos;      // Position of the player
@@ -71,23 +62,9 @@ void main() {
 
     floorPos += floorStep * float(x);
 
-    uint textureIdx = 5;
+    uint textureIdx = 6;
     vec2 texCoord = fract(floorPos);
-    vec4 color;
-
-    // SWITCH STATEMENT
-    switch (textureIdx){
-        case 1: color = texture(tex1, texCoord); break;
-        case 2: color = texture(tex2, texCoord); break;
-        case 3: color = texture(tex3, texCoord); break;
-        case 4: color = texture(tex4, texCoord); break;
-        case 5: color = texture(tex5, texCoord); break;
-        case 6: color = texture(tex6, texCoord); break;
-        case 7: color = texture(tex7, texCoord); break;
-        case 8: color = texture(tex8, texCoord); break;
-        case 9: color = texture(tex9, texCoord); break;
-        default: break;
-    }
+    vec4 color = texture(textures[textureIdx], texCoord);
 
     imageStore(outImage, ivec2(x, y), color);
 }

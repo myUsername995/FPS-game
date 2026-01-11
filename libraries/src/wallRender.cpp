@@ -23,13 +23,15 @@ GLuint texLines = 0;
 GLuint texColumns = 0;
 
 // GPU friendly arrays
-std::vector<uint32_t> lineTextures;
-std::vector<float> vec2s;
-std::vector<Line> lines;
+std::vector<uint32_t> lineTextures; // The texture each line has
+std::vector<float> vec2s;           // The world map but in a gpu friendly array
+std::vector<Line> lines;            // The world map
+std::vector<GLint> units;           // Stores which texture units to bind to the texture array
 
 // Textures
 std::vector<Texture> textures;
-std::vector<GLuint> glTextures;
+std::vector<GLuint> glTextures;      // Stores the ID of each texture
+std::vector<SDL_Surface*> converted; // Make sure we dont leak memory
 
 int maxTextures;
 
@@ -119,13 +121,10 @@ bool createTextures(){
     }
 
     // Input (textures)
-    for (int i = 0; i < textures.size(); i++){
-        SDL_Surface* surf = SDL_ConvertSurface(textures[i].texture, SDL_PIXELFORMAT_RGBA32);
-        
+    for (int i = 0; i < converted.size(); i++){
         glGenTextures(1, &glTextures[i]);
         glBindTexture(GL_TEXTURE_2D, glTextures[i]);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, textures[i].width, textures[i].height, 0, GL_RGBA, GL_UNSIGNED_BYTE, 
-                     surf->pixels);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, converted[i]->w, converted[i]->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, converted[i]->pixels);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
@@ -133,6 +132,8 @@ bool createTextures(){
             std::cout << "Failed to load input textures.\n";
             return false;
         }
+
+        units[i] = i;
     }
 
     return true;
@@ -145,12 +146,8 @@ void generateTextures(std::string& wallStr, std::string& floorStr, std::string& 
     std::string tab = "    ";
 
     // Insert the uniforms into every string first
-    std::string uniforms;
-
-    // Generate the text
-    for (int i = 0; i < textures.size(); i++){
-        uniforms += "uniform sampler2D tex" + std::to_string(i+1) + ";\n";
-    }
+    std::string arrSize = std::to_string(textures.size());
+    std::string uniforms = "uniform sampler2D textures[" + arrSize + "];";
 
     // Search for the identifiers "// UNIFORMS" and "// SWITCH STATEMENT"
     std::string uniformID = "// UNIFORMS\n";
@@ -165,48 +162,24 @@ void generateTextures(std::string& wallStr, std::string& floorStr, std::string& 
     floorStr.insert(floorUniform, uniforms);
     ceilingStr.insert(ceilingUniform, uniforms);
 
-    // Insert the switch statement into the string too
-    std::string switchStatement;
-    switchStatement += tab + "switch (textureIdx){\n";
+    {
+        std::ofstream file("shaders\\wallChanged.glsl");
+        file.write(wallStr.c_str(), wallStr.size());
 
-    // Generate the text
-    for (int i = 0; i < textures.size(); i++){
-        switchStatement += tab + tab + "case " + std::to_string(i+1) + ": color = texture(tex" + std::to_string(i+1) + ", texCoord); break;\n";
+        file.close();
     }
+    {
+        std::ofstream file("shaders\\floorChanged.glsl");
+        file.write(floorStr.c_str(), floorStr.size());
 
-    // Default case
-    switchStatement += tab + tab + "default: break;\n";
-    switchStatement += tab + "}\n";
+        file.close();
+    }
+    {
+        std::ofstream file("shaders\\ceilingChanged.glsl");
+        file.write(ceilingStr.c_str(), ceilingStr.size());
 
-    std::string switchID = "// SWITCH STATEMENT\n";
-
-    // Find the positions
-    int wallSwitch = wallStr.find(switchID) + switchID.length();
-    int floorSwitch = floorStr.find(switchID) + switchID.length();
-    int ceilingSwitch = ceilingStr.find(switchID) + switchID.length();
-    
-    // Insert
-    wallStr.insert(wallSwitch, switchStatement);
-    floorStr.insert(floorSwitch, switchStatement);
-    ceilingStr.insert(ceilingSwitch, switchStatement);
-{
-    std::ofstream file("shaders\\wallChanged.glsl");
-    file.write(wallStr.c_str(), wallStr.size());
-
-    file.close();
-}
-{
-    std::ofstream file("shaders\\floorChanged.glsl");
-    file.write(floorStr.c_str(), floorStr.size());
-
-    file.close();
-}
-{
-    std::ofstream file("shaders\\ceilingChanged.glsl");
-    file.write(ceilingStr.c_str(), ceilingStr.size());
-
-    file.close();
-}
+        file.close();
+    }
 }
 
 void initBuffers(){
@@ -257,13 +230,18 @@ void initBuffers(){
     }
 }
 
+// Called once at initialisation
 int initShaders(SDL_Window* window, const std::vector<Line>& inLines, const std::vector<Texture>& wallTex){
+    // Resize the window
     getWindowSize(window);
 
+    // Story the constant arrays into global variables
     lines = inLines;
     textures = wallTex;
     glTextures.resize(textures.size());
+    units.resize(textures.size());
 
+    // Make sure the textures don't exceed the number of textures openGL can handle
     glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &maxTextures);
     if (textures.size() > maxTextures){
         std::cout << "The number of input textures exceeded the limit of allowed textures (" + std::to_string(maxTextures) + ").\n";
@@ -280,10 +258,8 @@ int initShaders(SDL_Window* window, const std::vector<Line>& inLines, const std:
     // Initialize the rendering output
     initQuad();
 
-    // Initialise buffers used for transfering data between the compute shaders that render the scene and the ones that calculate
-    // stuff
+    // Initialise buffers used for transfering data between the shaders
     initBuffers();
-    createTextures();
 
     GLuint computeProgram = CompileShader(LoadFile("shaders\\raycast.glsl"), GL_COMPUTE_SHADER);
     GLuint wallProgram = CompileShader(wallStr, GL_COMPUTE_SHADER);
@@ -341,6 +317,15 @@ int initShaders(SDL_Window* window, const std::vector<Line>& inLines, const std:
         lineTextures.push_back(static_cast<uint32_t>(line.texture));
     }
 
+    // Convert the surface to the openGL format
+    converted.resize(textures.size());
+    for (int i = 0; i < textures.size(); i++){
+        converted[i] = SDL_ConvertSurface(textures[i].texture, SDL_PIXELFORMAT_RGBA32);
+    }
+
+    // Create the output and input textures
+    createTextures();
+
     return 1;
 }
 
@@ -362,11 +347,7 @@ enum shaderType {
 
 // Set the texture uniforms to the right textures
 void setUniforms(GLuint currentShader){
-    std::string lookUp;
-    for (int i = 0; i < glTextures.size(); i++){
-        lookUp = "tex" + std::to_string(i+1);
-        glUniform1i(glGetUniformLocation(currentShader, lookUp.c_str()), i);
-    }
+    glUniform1iv(glGetUniformLocation(currentShader, "textures"), units.size(), units.data());
 }
 
 void activateTextures(){
@@ -419,40 +400,51 @@ void dispatchShader(shaderType type, Vector lookDir, Vector camera, SDL_FPoint p
 
         int groupsX = (W + 255) / 256;
         glDispatchCompute(groupsX, 1, 1);
-
-        // Return to not run any other shaders
-        return;
     }
+    else if (type == WALL){
+        glUseProgram(wallShader);
+        glBindImageTexture(0, outputTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
 
-    // The other shaders are similar, so we can handle them simpler
-    GLuint currentShader;
-    switch (type){
-        case WALL: currentShader = wallShader; break;
-        case FLOOR: currentShader = floorShader; break;
-        case CEILING: currentShader = ceilingShader; break;
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, wallRangesBuffer);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, texCoordsBuffer);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, texColumns);
+
+        // Set the texture related uniforms
+        setUniforms(wallShader);
+
+        glUniform1ui(glGetUniformLocation(wallShader, "WINDOW_WIDTH"), W);
+        glUniform1ui(glGetUniformLocation(wallShader, "WINDOW_HEIGHT"), H);
+        glUniform1f(glGetUniformLocation(wallShader, "texWidth"), 64);
+        glUniform1f(glGetUniformLocation(wallShader, "texHeight"), 64);
+
+        int renderX = (W + 255) / 256;
+        glDispatchCompute(renderX, 1, 1);
     }
+    else {
+        // The other shaders are similar, so we can handle them simpler
+        GLuint currentShader;
+        switch (type){
+            case FLOOR: currentShader = floorShader; break;
+            case CEILING: currentShader = ceilingShader; break;
+        }
 
-    glUseProgram(currentShader);
-    glBindImageTexture(0, outputTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
+        glUseProgram(currentShader);
+        glBindImageTexture(0, outputTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
 
-    // Set the texture related uniforms
-    setUniforms(currentShader);
+        // Set the texture related uniforms
+        setUniforms(currentShader);
 
-    glUniform2f(glGetUniformLocation(currentShader, "lookDir"), lookDir.x, lookDir.y);
-    glUniform2f(glGetUniformLocation(currentShader, "camera"), camera.x, camera.y);
-    glUniform2f(glGetUniformLocation(currentShader, "playerPos"), playerPosition.x, playerPosition.y);
-    glUniform1ui(glGetUniformLocation(currentShader, "WINDOW_WIDTH"), W);
-    glUniform1ui(glGetUniformLocation(currentShader, "WINDOW_HEIGHT"), H);
-    glUniform1f(glGetUniformLocation(currentShader, "texWidth"), 64);
-    glUniform1f(glGetUniformLocation(currentShader, "texHeight"), 64);
+        glUniform2f(glGetUniformLocation(currentShader, "lookDir"), lookDir.x, lookDir.y);
+        glUniform2f(glGetUniformLocation(currentShader, "camera"), camera.x, camera.y);
+        glUniform2f(glGetUniformLocation(currentShader, "playerPos"), playerPosition.x, playerPosition.y);
+        glUniform1ui(glGetUniformLocation(currentShader, "WINDOW_WIDTH"), W);
+        glUniform1ui(glGetUniformLocation(currentShader, "WINDOW_HEIGHT"), H);
 
-    int renderX = (W + 15) / 16;
-    int renderY = (H + 15) / 16;
-    glDispatchCompute(renderX, renderY, 1);
+        int renderX = (W + 15) / 16;
+        int renderY = (H + 15) / 16;
+        glDispatchCompute(renderX, renderY, 1);
+    }
 }
-
-int step = 0;
-double threshold = std::stod(LoadFile("a"));
 
 void renderWallz(SDL_Window* window, Vector lookDir, Vector camera, SDL_FPoint playerPosition){
     getWindowSize(window);
@@ -468,12 +460,10 @@ void renderWallz(SDL_Window* window, Vector lookDir, Vector camera, SDL_FPoint p
 
     activateTextures();
 
-    step++;
     // Render order doesn't matter, they don't draw over each other
-    if (step >= threshold) dispatchShader(WALL, lookDir, camera, playerPosition);
-    if (step >= threshold * 2) dispatchShader(CEILING, lookDir, camera, playerPosition);
-    if (step >= threshold * 3) dispatchShader(FLOOR, lookDir, camera, playerPosition);
-    if (step >= threshold * 4) step = 0;
+    dispatchShader(WALL, lookDir, camera, playerPosition);
+    dispatchShader(FLOOR, lookDir, camera, playerPosition);
+    dispatchShader(CEILING, lookDir, camera, playerPosition);
 
     // Ensure writes are visible
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);

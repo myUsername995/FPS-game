@@ -68,6 +68,7 @@ void main() {
     if (x >= WINDOW_WIDTH){
         return;
     }
+
     // Normalized screen x in range [-1, 1]
     float cameraX = (2.0 * x) / float(WINDOW_WIDTH) - 1.0;
 
@@ -95,7 +96,7 @@ void main() {
             }
         }
     }
-    
+
     // If no hit, just clear column (e.g., black)
     if (closestLineIndex == uint(-1)) {
         wallRanges[x] = vec2(0, 0);         // (0, 0) indicates no collision
@@ -134,7 +135,7 @@ void main() {
 
     // Fraction along the segment using projection
     float texX = dot(hitDiff, wallDir) / dot(wallDir, wallDir);
-    texX = clamp(texX, 0.0, 1.0) * float(texWidth - 1);
+    texX = clamp(texX, 0.0, 1.0) * float(texWidth);
 
     // Vertical texture mapping
     float stepY = float(texHeight) / lineHeight;

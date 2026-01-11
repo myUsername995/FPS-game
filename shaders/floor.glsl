@@ -64,9 +64,7 @@ void main() {
 
     uint textureIdx = 3;
     vec2 texCoord = fract(floorPos);
-    vec4 color;
-
-    // SWITCH STATEMENT
+    vec4 color = texture(textures[textureIdx], texCoord);
 
     imageStore(outImage, ivec2(x, y), color);
 }
