@@ -5,6 +5,7 @@
 #include <string>
 #include <cmath>
 #include <atomic>
+#include <cstdint>
 #include "gameState.hpp"
 
 class Client {
@@ -17,12 +18,6 @@ class Client {
 
     bool connectToServer(gameState& state, std::string serverIP);
     void disconnectFromServer();
-    void receiveData(gameState& state, std::atomic<bool>& run);
+    void receiveData(gameState& state);
     void sendData(gameState& state);
-};
-
-class Server {
-    public:
-    void receiveData(ENetHost* server);
-    void sendData(ENetPeer* client);
 };

@@ -51,6 +51,10 @@ layout(std430, binding = 4) buffer textureColumnsBuffer {
     uint textureColumns[];
 };
 
+layout(std430, binding = 5) buffer depthBufferBuf {
+    float depthBuffer[];
+};
+
 uniform uint numLines;       // Number of lines on the map
 uniform vec2 lookDir;        // Look direction of our player (normalized)
 uniform vec2 camera;         // Camera plane vector
@@ -104,9 +108,12 @@ void main() {
         return;
     }
 
-    // True distance to wall (optionally fisheye-corrected)
+    // True distance to wall
     float dist = sqrt(closestDistSq);
     float perpWallDist = dist * dot(ray, normalize(lookDir)); // ensure lookDir is normalized
+
+    // Store the distance in a depth buffer
+    depthBuffer[x] = dist;
 
     // Avoid division by zero
     if (perpWallDist < 1e-4) {

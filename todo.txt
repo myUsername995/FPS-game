@@ -1,7 +1,0 @@
-add GPU rendering
-add map selection
-add shooting
-add a non-tiled world
-add copying to the map editor
-add clearing to the map editor
-clean up the raycast.cpp file

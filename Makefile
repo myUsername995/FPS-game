@@ -33,7 +33,7 @@ ENET_LIBS     = -L"./enet-1.3.18" -lenet64 -lws2_32 -lwinmm
 # =========================
 TIME_SRC = C:/Files/.vscode/myLibraries/libraries/src/time.cpp
 NETWORKING_SRC = ./libraries/src/networking.cpp
-RENDERING_SRC = ./libraries/src/wallRender.cpp C:/Files/.vscode/myLibraries/libraries/src/GPU.cpp \
+RENDERING_SRC = ./libraries/src/render.cpp C:/Files/.vscode/myLibraries/libraries/src/GPU.cpp \
 				C:/Files/.vscode/myLibraries/glad/glad.c
 
 # =========================
@@ -71,7 +71,3 @@ server.exe: server.cpp
 	$(ENET_INCLUDES) \
 	$(COMMON_LIBS) \
 	$(ENET_LIBS)
-
-# -------- clean --------
-clean:
-	del /Q *.exe 2>nul || exit 0

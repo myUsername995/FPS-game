@@ -5,6 +5,9 @@
 #include <string>
 #include <cmath>
 
+extern float PI;
+extern std::string serverIP;
+
 class Vector {
     public:
         Vector(){}
@@ -69,6 +72,7 @@ class Player {
 
         // Decided by the server
         int playerID;
+        std::string username;
 
         // Player data
         SDL_FPoint pos;

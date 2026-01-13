@@ -17,20 +17,28 @@ ON CLIENT INPUT:
 #include <array>
 #include <string>
 #include <cmath>
+#include <cstdint>
+#include <fstream>
 
 // Used for sending data over the network
 struct Network_player {
     // Metadata
-    int playerID;
+    uint32_t playerID;
 
     // Player data
-    SDL_FPoint pos;
-    float lookDirX, lookDirY;
-    float cameraX, cameraY;
+    float posX;
+    float posY;
+    float lookDirX;
+    float lookDirY;
 
-    // Animation related dta
-    bool isMoving;
-    int animationStep;
+    // Animation related data
+    uint8_t isMoving;
+    uint8_t animationStep;
+};
+
+struct ClientData {
+    uint32_t playerID;
+    std::string username;
 };
 
 struct sprite {
@@ -38,14 +46,9 @@ struct sprite {
     int texture;
 };
 
-struct ClientData {
-    int playerID;
-    std::string username;
-};
+bool readMapData(std::string fileName, std::vector<int>& worldMap, std::vector<sprite>& sprites, uint32_t& width, uint32_t& height, 
+                 uint32_t& numSprites){
 
-#include <fstream>
-
-bool readMapData(std::string fileName, int** worldMap, sprite** sprites, uint32_t& width, uint32_t& height, uint32_t& numSprites){
     std::ifstream in(fileName, std::ios::binary);
 
     if (!in){
@@ -57,26 +60,25 @@ bool readMapData(std::string fileName, int** worldMap, sprite** sprites, uint32_
     in.read((char*)&height, sizeof(height));
     in.read((char*)&numSprites, sizeof(numSprites));
 
-    *worldMap = new int[width * height];
-    *sprites  = new sprite[numSprites];
+    worldMap.resize(width * height);
+    sprites.resize(numSprites);
 
-    in.read((char*)*worldMap, width * height * sizeof(int));
+    in.read((char*)worldMap.data(), width * height * sizeof(int));
 
-    for (uint32_t i = 0; i < numSprites; i++) {
-        sprite curSprite = (*sprites)[i];
+    for (int i = 0; i < numSprites; i++){
+        sprite newSprite;
+        in.read((char*)&newSprite.x, sizeof(float));
+        in.read((char*)&newSprite.y, sizeof(float));
+        in.read((char*)&newSprite.texture, sizeof(int32_t));
 
-        in.read((char*)&curSprite.y, sizeof(float));
-        in.read((char*)&curSprite.x, sizeof(float));
-        in.read((char*)&curSprite.texture, sizeof(int32_t));
-
-        (*sprites)[i] = curSprite;
+        sprites[i] = newSprite;
     }
 
     return true;
 }
 
-int findAvailableID(std::array<bool, 100>& IDs){
-    for (int i = 0; i < 100; i++){
+uint32_t findAvailableID(std::array<bool, 100>& IDs){
+    for (uint32_t i = 0; i < 100; i++){
         // true -> available
         if (IDs[i]){
             return i;
@@ -88,8 +90,8 @@ int findAvailableID(std::array<bool, 100>& IDs){
 }
 
 // Return the index into the players array, based on a playerID
-int findPlayerID(const std::vector<Network_player>& players, int id){
-    for (int i = 0; i < players.size(); i++){
+uint32_t findPlayerID(const std::vector<Network_player>& players, int id){
+    for (uint32_t i = 0; i < players.size(); i++){
         if (players[i].playerID == id){
             return i;
         }
@@ -138,15 +140,15 @@ int main(int argc, char* argv[]){
     std::array<bool, 100> availableIDs;
     availableIDs.fill(true);
 
-    sprite* sprites;
-    int* flattenedMap;
+    std::vector<sprite> sprites;
+    std::vector<int> flattenedMap;
     uint32_t mapWidth, mapHeight, numSprites;
 
     std::string fileName;
     std::cout << "Enter a filename: \n";
     std::cin >> fileName;
 
-    if (!readMapData("maps/" + fileName, &flattenedMap, &sprites, mapWidth, mapHeight, numSprites)) return 0;
+    if (!readMapData("maps/" + fileName, flattenedMap, sprites, mapWidth, mapHeight, numSprites)) return 0;
 
     ENetAddress address;
     address.host = ENET_HOST_ANY;
@@ -170,7 +172,7 @@ int main(int argc, char* argv[]){
                     std::string username = getRandomName(randNames, numNames);
 
                     // Give him an ID
-                    int playerID = findAvailableID(availableIDs);
+                    uint32_t playerID = findAvailableID(availableIDs);
                     if (playerID == -1) { enet_peer_reset(event.peer); break; }
                     availableIDs[playerID] = false;
 
@@ -182,26 +184,35 @@ int main(int argc, char* argv[]){
                     std::cout << username << " connected to the server. " << numPlayers << " player(s) online." << std::endl;
 
                     // Store safe client data
-                    event.peer->data = new ClientData{playerID, username};
+                    event.peer->data = new ClientData{static_cast<uint32_t>(playerID), username};
 
-                    // Send ID back to client
-                    ENetPacket* idPacket = enet_packet_create(&playerID, sizeof(playerID), ENET_PACKET_FLAG_RELIABLE);
+                    struct playerMetaData {
+                        uint32_t playerID;
+                        char username[32];
+                    };
+
+                    playerMetaData packet;
+                    packet.playerID = playerID;
+                    strncpy(packet.username, username.c_str(), sizeof(packet.username) - 1);
+                    packet.username[sizeof(packet.username)-1] = '\0';
+
+                    // Send ID and username back to the client
+                    ENetPacket* idPacket = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
                     enet_peer_send(event.peer, 0, idPacket);
 
-                    // Send with and height
+                    // Send our map dimensions first
                     struct Dimensions {
                         int width, height;
                     };
+                    Dimensions dims;
+                    dims.width = mapWidth;
+                    dims.height = mapHeight;
 
-                    Dimensions mapDimensions;
-                    mapDimensions.width = mapWidth;
-                    mapDimensions.height = mapHeight;
-
-                    ENetPacket* dimensionsPacket = enet_packet_create(&mapDimensions, sizeof(mapDimensions), ENET_PACKET_FLAG_RELIABLE);
+                    ENetPacket* dimensionsPacket = enet_packet_create(&dims, sizeof(dims), ENET_PACKET_FLAG_RELIABLE);
                     enet_peer_send(event.peer, 0, dimensionsPacket);
 
                     // Send the map data to the client
-                    ENetPacket* mapPacket = enet_packet_create(flattenedMap, mapWidth * mapHeight * sizeof(int), ENET_PACKET_FLAG_RELIABLE);
+                    ENetPacket* mapPacket = enet_packet_create(flattenedMap.data(), mapWidth * mapHeight * sizeof(int), ENET_PACKET_FLAG_RELIABLE);
                     enet_peer_send(event.peer, 0, mapPacket);
 
                     // Send the sprites data
@@ -210,7 +221,7 @@ int main(int argc, char* argv[]){
                     enet_peer_send(event.peer, 0, spritesLength);
 
                     // Actual data
-                    ENetPacket* spritesPacket = enet_packet_create(sprites, numSprites * sizeof(sprite), ENET_PACKET_FLAG_RELIABLE);
+                    ENetPacket* spritesPacket = enet_packet_create(sprites.data(), numSprites * sizeof(sprite), ENET_PACKET_FLAG_RELIABLE);
                     enet_peer_send(event.peer, 0, spritesPacket);
 
                     enet_host_flush(server);

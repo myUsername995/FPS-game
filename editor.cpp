@@ -150,14 +150,6 @@ int nearestSprite(std::vector<Sprite> sprites, SDL_FPoint mouse){
 void writeMapData(std::string fileName, const std::vector<std::vector<Tile>>& map, std::vector<Sprite> sprites){
     std::ofstream out("maps/" + fileName, std::ios::binary);
 
-    // The raycastserver.cpp uses this struct to store sprites, and uses int** arrays to store maps, but we can use a flat int* array
-    // because he can read that and convert it to an int**
-
-    struct sprite {
-        float x, y;
-        int texture;
-    };
-
     uint32_t width  = map.size();
     uint32_t height = map[0].size();
     uint32_t numSprites = sprites.size();

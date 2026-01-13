@@ -1,10 +1,13 @@
-#include "wallRender.hpp"
+#include "render.hpp"
 #include <SDL3_image/SDL_image.h>
 #include <vector>
 #include <iostream>
+#include <algorithm>
+#include <array>
+#include <fstream>
 
 // Shaders
-GLuint computeShader, wallShader, floorShader, ceilingShader;
+GLuint computeShader, wallShader, floorShader, ceilingShader, spriteShader;
 GLuint screenShader;
 
 // Metadata
@@ -13,25 +16,41 @@ int outputW, outputH;
 
 // Textures
 GLuint outputTex = 0;
-GLuint linesBuffer = 0;
-GLuint texture = 0;
+GLuint spriteTex = 0;
 
 // Buffers
+GLuint linesBuffer = 0;
 GLuint wallRangesBuffer = 0;
 GLuint texCoordsBuffer = 0;
 GLuint texLines = 0;
 GLuint texColumns = 0;
+GLuint depthBuf = 0;
 
 // GPU friendly arrays
 std::vector<uint32_t> lineTextures; // The texture each line has
 std::vector<float> vec2s;           // The world map but in a gpu friendly array
 std::vector<Line> lines;            // The world map
 std::vector<GLint> units;           // Stores which texture units to bind to the texture array
+std::vector<float> ZBuffer;         // The depths of the walls in each column
 
 // Textures
 std::vector<Texture> textures;
 std::vector<GLuint> glTextures;      // Stores the ID of each texture
 std::vector<SDL_Surface*> converted; // Make sure we dont leak memory
+
+// Used for storing CPU textures
+struct rawTexture {
+    std::vector<Uint32> texture;
+    int width, height;
+};
+
+std::vector<Uint32> buffer;
+static std::vector<rawTexture> spriteTextures;
+static std::vector<rawTexture> playerTextures;
+static std::vector<rawTexture> playerRunTextures;
+int numAnimations = 4; int numOrientations = 8;     // For the run textures
+
+const SDL_PixelFormatDetails* fmt;
 
 int maxTextures;
 
@@ -105,6 +124,7 @@ void drawTexture(GLuint screenShader, GLuint tex, float r = 1.0f, float g = 1.0f
 
 bool createTextures(){
     if (outputTex != 0) glDeleteTextures(1, &outputTex);
+    if (spriteTex != 0) glDeleteTextures(1, &spriteTex);
 
     // Create the textures
     // Output
@@ -122,6 +142,8 @@ bool createTextures(){
 
     // Input (textures)
     for (int i = 0; i < converted.size(); i++){
+        if (glTextures[i] != 0) glDeleteTextures(1, &glTextures[i]);
+
         glGenTextures(1, &glTextures[i]);
         glBindTexture(GL_TEXTURE_2D, glTextures[i]);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, converted[i]->w, converted[i]->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, converted[i]->pixels);
@@ -136,10 +158,15 @@ bool createTextures(){
         units[i] = i;
     }
 
+    // Output of the sprite texture
+    glGenTextures(1, &spriteTex);
+    glBindTexture(GL_TEXTURE_2D, spriteTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
     return true;
 }
-
-#include <fstream>
 
 void generateTextures(std::string& wallStr, std::string& floorStr, std::string& ceilingStr){
     // The length of a tab
@@ -204,6 +231,10 @@ void initBuffers(){
         glDeleteBuffers(1, &texColumns);
     }
 
+    if (depthBuf != 0){
+        glDeleteBuffers(1, &depthBuf);
+    }
+
     // Create the buffers
     glGenBuffers(1, &linesBuffer);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, linesBuffer);
@@ -225,21 +256,66 @@ void initBuffers(){
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, texColumns); 
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, texColumns);
 
-    if (linesBuffer == 0 || wallRangesBuffer == 0 || texCoordsBuffer == 0 || texLines == 0 || texColumns == 0) {
+    glGenBuffers(1, &depthBuf);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, depthBuf); 
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, depthBuf);
+
+    if (linesBuffer == 0 || wallRangesBuffer == 0 || texCoordsBuffer == 0 || texLines == 0 || texColumns == 0 || depthBuf == 0) {
         std::cerr << "Buffer was not created properly." << std::endl;
     }
 }
 
+SDL_Color Uint32ToRGBA(Uint32 pixel){
+    SDL_Color c;
+    SDL_GetRGBA(pixel, fmt, nullptr, &c.r, &c.g, &c.b, &c.a);
+    return c;
+}
+
+Uint32 RGBAToUint32(const SDL_Color& c){
+    return SDL_MapRGBA(fmt, nullptr, c.r, c.g, c.b, c.a);
+}
+
+
+// Copies an SDL_Surface* into an std::vector<Uint32>
+void copyTexture(std::vector<Uint32>& texDst, SDL_Surface* texSrc){
+    SDL_Surface* rgba = SDL_ConvertSurface(texSrc, SDL_PIXELFORMAT_RGBA32);
+    const int w = rgba->w;
+    const int h = rgba->h;
+
+    std::vector<Uint32> pixels(w * h);
+    if (SDL_MUSTLOCK(rgba)) SDL_LockSurface(rgba);
+
+    Uint8* srcPixels = (Uint8*)rgba->pixels;
+    for (int y = 0; y < h; ++y) {
+        memcpy(
+            pixels.data() + (h - 1 - y) * w,
+            srcPixels + y * rgba->pitch,
+            w * sizeof(Uint32)
+        );
+    }
+
+    if (SDL_MUSTLOCK(rgba)) SDL_UnlockSurface(rgba);
+
+    SDL_DestroySurface(rgba);
+
+    texDst = pixels;
+}
+
 // Called once at initialisation
-int initShaders(SDL_Window* window, const std::vector<Line>& inLines, const std::vector<Texture>& wallTex){
+int initShaders(SDL_Window* window, const std::vector<Line>& inLines, const std::vector<Texture>& wallTex, std::array<Texture, 8> playerTexs, 
+                std::array<std::array<Texture, 8>, 4> playerRunTexs, std::vector<Texture> spriteTexs){
     // Resize the window
     getWindowSize(window);
+
+    // Initialise the pixel format differently if needed
+    fmt = SDL_GetPixelFormatDetails(SDL_PIXELFORMAT_RGBA32);
 
     // Story the constant arrays into global variables
     lines = inLines;
     textures = wallTex;
     glTextures.resize(textures.size());
     units.resize(textures.size());
+    ZBuffer.resize(W, 0);
 
     // Make sure the textures don't exceed the number of textures openGL can handle
     glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &maxTextures);
@@ -265,13 +341,15 @@ int initShaders(SDL_Window* window, const std::vector<Line>& inLines, const std:
     GLuint wallProgram = CompileShader(wallStr, GL_COMPUTE_SHADER);
     GLuint floorProgram = CompileShader(floorStr, GL_COMPUTE_SHADER);
     GLuint ceilingProgram = CompileShader(ceilingStr, GL_COMPUTE_SHADER);
+    GLuint spriteProgram = CompileShader(LoadFile("shaders\\sprites.glsl"), GL_COMPUTE_SHADER);
 
-    if (computeProgram == 0 || wallProgram == 0 || floorProgram == 0 || ceilingProgram == 0) return -1;
+    if (computeProgram == 0 || wallProgram == 0 || floorProgram == 0 || ceilingProgram == 0 || spriteProgram == 0) return -1;
 
     computeShader = CreateComputeProgram(computeProgram);
     wallShader = CreateComputeProgram(wallProgram);
     floorShader = CreateComputeProgram(floorProgram);
     ceilingShader = CreateComputeProgram(ceilingProgram);
+    spriteShader = CreateComputeProgram(spriteProgram);
 
     if (computeShader == 0 || wallShader == 0 || floorShader == 0 || ceilingShader == 0) return -1;
 
@@ -323,6 +401,35 @@ int initShaders(SDL_Window* window, const std::vector<Line>& inLines, const std:
         converted[i] = SDL_ConvertSurface(textures[i].texture, SDL_PIXELFORMAT_RGBA32);
     }
 
+    // Sprite rendering related
+    buffer.resize(W * H);
+
+    spriteTextures.resize(spriteTexs.size());
+    // Copy sprites
+    for (int i = 0; i < spriteTexs.size(); i++){
+        copyTexture(spriteTextures[i].texture, spriteTexs[i].texture);
+        spriteTextures[i].width = spriteTexs[i].width;
+        spriteTextures[i].height = spriteTexs[i].height;
+    }
+
+    playerTextures.resize(playerTexs.size());
+    // Copy player texs
+    for (int i = 0; i < playerTexs.size(); i++){
+        copyTexture(playerTextures[i].texture, playerTexs[i].texture);
+        playerTextures[i].width = playerTexs[i].width;
+        playerTextures[i].height = playerTexs[i].height;
+    }
+
+    // Copy player run texs
+    playerRunTextures.resize(numAnimations * numOrientations);
+    for (int i = 0; i < numAnimations; i++){
+        for (int j = 0; j < numOrientations; j++){
+            copyTexture(playerRunTextures[i * numOrientations + j].texture, playerRunTexs[i][j].texture);
+            playerRunTextures[i * numOrientations + j].width = playerRunTexs[i][j].width;
+            playerRunTextures[i * numOrientations + j].height = playerRunTexs[i][j].height;
+        }
+    }
+
     // Create the output and input textures
     createTextures();
 
@@ -333,6 +440,8 @@ void resizeShaders(SDL_Window* window){
     getWindowSize(window);
 
     GPUResizeWindow(W, H);
+    ZBuffer.resize(W, 0);
+    buffer.resize(W * H);
 
     initBuffers();
     createTextures();
@@ -364,6 +473,8 @@ void dispatchShader(shaderType type, Vector lookDir, Vector camera, SDL_FPoint p
         glBindImageTexture(0, outputTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
 
         // Create the buffers
+
+        // Lines buffer -> the lines that make up our map
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, linesBuffer);
         glBufferData(GL_SHADER_STORAGE_BUFFER, vec2s.size() * sizeof(float), vec2s.data(), GL_DYNAMIC_DRAW);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, linesBuffer);
@@ -372,22 +483,30 @@ void dispatchShader(shaderType type, Vector lookDir, Vector camera, SDL_FPoint p
         std::vector<float> noDataV2(W * 2, 0);
         std::vector<float> noDataV4(W * 4, 0);
 
+        // The Y ranges where we should draw walls
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, wallRangesBuffer);
         glBufferData(GL_SHADER_STORAGE_BUFFER, W * 2 * sizeof(float), noDataV2.data(), GL_DYNAMIC_DRAW);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, wallRangesBuffer); 
         
+        // The starting texture cordinates and step values
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, texCoordsBuffer); 
         glBufferData(GL_SHADER_STORAGE_BUFFER, W * 4 * sizeof(float), noDataV4.data(), GL_DYNAMIC_DRAW);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, texCoordsBuffer);
 
-        // Put some actual data into this array
+        // The textures that the lines have
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, texLines); 
         glBufferData(GL_SHADER_STORAGE_BUFFER, lineTextures.size() * sizeof(uint32_t), lineTextures.data(), GL_DYNAMIC_DRAW);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, texLines);
 
+        // The texture that the columns have
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, texColumns); 
         glBufferData(GL_SHADER_STORAGE_BUFFER, W * sizeof(uint32_t), noDataUint.data(), GL_DYNAMIC_DRAW);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, texColumns);
+
+        // The depth buffer, used later by the sprite rendering
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, depthBuf); 
+        glBufferData(GL_SHADER_STORAGE_BUFFER, W * sizeof(float), ZBuffer.data(), GL_DYNAMIC_DRAW);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, depthBuf);
 
         glUniform1ui(glGetUniformLocation(computeShader, "numLines"), (unsigned int)lines.size());
         glUniform2f(glGetUniformLocation(computeShader, "lookDir"), lookDir.x, lookDir.y);
@@ -400,6 +519,13 @@ void dispatchShader(shaderType type, Vector lookDir, Vector camera, SDL_FPoint p
 
         int groupsX = (W + 255) / 256;
         glDispatchCompute(groupsX, 1, 1);
+
+        // Wait for SSBO writes to be visible to next stage
+        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+
+        // Read back the value of the depth buffer into the CPU array
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, depthBuf);
+        glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, W * sizeof(float), ZBuffer.data());
     }
     else if (type == WALL){
         glUseProgram(wallShader);
@@ -446,28 +572,209 @@ void dispatchShader(shaderType type, Vector lookDir, Vector camera, SDL_FPoint p
     }
 }
 
-void renderWallz(SDL_Window* window, Vector lookDir, Vector camera, SDL_FPoint playerPosition){
-    getWindowSize(window);
+// Sort algorithm
+// Sort the sprites based on distance
+void sortSprites(const gameState& state, std::vector<int>& order, std::vector<double>& dist){
+    int amount = state.numSprites + state.numPlayerSprites;
+    order.resize(amount);
+    dist.resize(amount);
+
+    // SPRITE CASTING
+    // Sort sprites from far to close
+    for(int i = 0; i < amount; i++){
+        order[i] = i;
+        dist[i] = ((state.player.pos.x - state.sprites[i].pos.x) * (state.player.pos.x - state.sprites[i].pos.x) + 
+                            (state.player.pos.y - state.sprites[i].pos.y) * (state.player.pos.y - state.sprites[i].pos.y)); //sqrt not taken, unneeded
+    }
+
+    std::vector<std::pair<double, int>> sprites(amount);
+    for(int i = 0; i < amount; i++) {
+        sprites[i].first = dist[i];
+        sprites[i].second = order[i];
+    }
+    std::sort(sprites.begin(), sprites.end());
+    // restore in reverse order to go from farthest to nearest
+    for(int i = 0; i < amount; i++) {
+        dist[i] = sprites[amount - i - 1].first;
+        order[i] = sprites[amount - i - 1].second;
+    }
+}
+
+void renderSprites(const gameState& state){
+    Player player = state.player;
+    std::vector<Player> otherPlayers = state.otherPlayers;
+
+    // Arrays used to sort the sprites
+    std::vector<int> spriteOrder;
+    std::vector<double> spriteDistance;
+
+    sortSprites(state, spriteOrder, spriteDistance);
+    int fullNumSprites = state.numPlayerSprites + state.numSprites;
+
+    // After sorting the sprites, do the projection and draw them
+    for(int i = 0; i < fullNumSprites; i++){
+        int spriteIndex = spriteOrder[i];
+        int spriteTexWidth, spriteTexHeight;
+
+        std::vector<Uint32> texture; // The current texture
+        SDL_FPoint spritePos; // The position of the sprite
+        SDL_Color invisColor; // The player sprite and other sprites use different colors (cuz I pulled them from different sources)
+
+        if (state.sprites[spriteIndex].isPlayer){
+            // Construct the player class from the struct
+            Player otherPlayer = state.otherPlayers[state.sprites[spriteIndex].index];
+
+            Vector spriteDir = otherPlayer.lookDir.normalize();
+            Vector toCamera;
+            toCamera.x = player.pos.x - otherPlayer.pos.x;
+            toCamera.y = player.pos.y - otherPlayer.pos.y;
+            toCamera.normalize();
+
+            double angle = atan2(
+                spriteDir.x * toCamera.y - spriteDir.y * toCamera.x,
+                spriteDir.x * toCamera.x + spriteDir.y * toCamera.y
+            );
+
+            double deg = angle * 180.0 / PI;
+            if (deg < 0) deg += 360;
+
+            int playerTexture = int((deg + 22.5) / 45.0) % 8;
+
+            // Assign texture
+            // Running texture
+            if (otherPlayer.isMoving){
+                int step = otherPlayer.animationStep;
+
+                texture = playerRunTextures[step * numOrientations + playerTexture].texture;
+                spriteTexWidth  = playerRunTextures[step * numOrientations + playerTexture].width;
+                spriteTexHeight = playerRunTextures[step * numOrientations + playerTexture].height;
+            }
+            // Standing texture
+            else {
+                texture = playerTextures[playerTexture].texture;
+                spriteTexWidth  = playerTextures[playerTexture].width;
+                spriteTexHeight = playerTextures[playerTexture].height;
+            }
+
+            spritePos = otherPlayer.pos;
+
+            // Weird purple thingy
+            invisColor = {152, 0, 136, 255};
+        }
+        else {
+            int tex = state.sprites[spriteIndex].texture;
+            texture = spriteTextures[tex].texture;
+            spriteTexWidth  = spriteTextures[tex].width;
+            spriteTexHeight = spriteTextures[tex].height;
+            spritePos = state.sprites[spriteIndex].pos;
+
+            // Black
+            invisColor = {0, 0, 0, 255};
+        }
+
+        // Translate sprite position to relative to camera
+        double spriteX = spritePos.x - player.pos.x;
+        double spriteY = spritePos.y - player.pos.y;
+
+        // Transform sprite with the inverse camera matrix
+        // [ planeX   dirX ] -1                                       [ dirY      -dirX ]
+        // [               ]       =  1/(planeX*dirY-dirX*planeY) *   [                 ]
+        // [ planeY   dirY ]                                          [ -planeY  planeX ]
+
+        // Required for correct matrix multiplication
+        double invDet = 1.0 / (player.camera.x * player.lookDir.y - player.lookDir.x * player.camera.y);
+
+        double transformX = invDet * (player.lookDir.y * spriteX - player.lookDir.x * spriteY);
+        // This is actually the depth inside the screen, that what Z is in 3D
+        double transformY = invDet * (-player.camera.y * spriteX + player.camera.x * spriteY);
+
+        int spriteScreenX = int((W / 2) * (1 + transformX / transformY));
+
+        // Calculate height of the sprite on screen
+        int spriteHeight = abs(int(H / (transformY))); // Using 'transformY' instead of the real distance prevents fisheye
+        // Calculate lowest and highest pixel to fill in current stripe
+        int drawStartY = -spriteHeight / 2 + H / 2;
+        if (drawStartY < 0) drawStartY = 0;
+        int drawEndY = spriteHeight / 2 + H / 2;
+        if (drawEndY >= H) drawEndY = H - 1;
+
+        // Calculate width of the sprite
+        int spriteWidth = abs( int (H / (transformY)));
+        int drawStartX = -spriteWidth / 2 + spriteScreenX;
+        if(drawStartX < 0) drawStartX = 0;
+        int drawEndX = spriteWidth / 2 + spriteScreenX;
+        if(drawEndX >= W) drawEndX = W - 1;
+
+        // Loop through every vertical stripe of the sprite on screen
+        for (int stripe = drawStartX; stripe < drawEndX; stripe++){
+            int texX = (stripe + spriteWidth / 2 - spriteScreenX) * spriteTexWidth / spriteWidth;
+            // The conditions in the if are:
+            //1) it's in front of camera plane so you don't see things behind you
+            //2) it's on the screen (left)
+            //3) it's on the screen (right)
+            //4) ZBuffer, with perpendicular distance
+            if (transformY > 0 && stripe > 0 && stripe < W && transformY < ZBuffer[stripe]){
+                // For every pixel of the current stripe
+                for (int y = drawStartY; y < drawEndY; y++){
+                    int d = y - H / 2 + spriteHeight / 2;
+                    int texY = ((d * spriteTexHeight) / spriteHeight);
+
+                    Uint32 color = texture[spriteTexWidth * texY + texX]; // Get current color from the texture
+
+                    // Make sure the alpha matches
+                    SDL_Color compColor = Uint32ToRGBA(color);
+                    compColor.a = 255;
+                    if (RGBAToUint32(compColor) != RGBAToUint32(invisColor)){
+                        buffer[y * W + stripe] = color;
+                    }
+                }
+            }
+        }
+    }
+
+    // Upload our buffer to the GPU
+    glBindTexture(GL_TEXTURE_2D, spriteTex);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, buffer.data());
+
+    // Dispatch the compute shader
+    glUseProgram(spriteShader);
 
     glBindImageTexture(0, outputTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
-    // Clear output texture to avoid garbage
+    glBindImageTexture(1, spriteTex, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8);
+
+    glUniform1ui(glGetUniformLocation(spriteShader, "WINDOW_WIDTH"), W);
+    glUniform1ui(glGetUniformLocation(spriteShader, "WINDOW_HEIGHT"), H);
+
+    glDispatchCompute((W+15)/16, (H+15)/16, 1);
+}
+
+// Renders walls, floor, ceiling and sprites
+void renderMap(SDL_Window* window, const gameState& state){
+    // Clear the screen buffer (that sprite rendering uses)
+    for (int i = 0; i < buffer.size(); i++){
+        buffer[i] = 0;
+    }
+
+    // Setup for compute shader dispatches
+    glBindImageTexture(0, outputTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
     glClearTexImage(outputTex, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-
-    dispatchShader(COMPUTE, lookDir, camera, playerPosition);
-
-    // Wait for SSBO writes to be visible to next stage
-    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
-
     activateTextures();
 
+    // Compute everything firsst
+    dispatchShader(COMPUTE, state.player.lookDir, state.player.camera, state.player.pos);
+
     // Render order doesn't matter, they don't draw over each other
-    dispatchShader(WALL, lookDir, camera, playerPosition);
-    dispatchShader(FLOOR, lookDir, camera, playerPosition);
-    dispatchShader(CEILING, lookDir, camera, playerPosition);
+    dispatchShader(WALL, state.player.lookDir, state.player.camera, state.player.pos);
+    dispatchShader(FLOOR, state.player.lookDir, state.player.camera, state.player.pos);
+    dispatchShader(CEILING, state.player.lookDir, state.player.camera, state.player.pos);
+
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+
+    // After rendering the map, render the sprites
+    renderSprites(state);
 
     // Ensure writes are visible
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
-    // Draw the output texture
     drawTexture(screenShader, outputTex);
 }
