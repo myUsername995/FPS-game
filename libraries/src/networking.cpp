@@ -17,6 +17,7 @@ struct Network_player {
     uint8_t animationStep;
 };
 
+// The number of none player sprites
 bool Client::connectToServer(gameState& state, std::string serverIP){
     Client::client = enet_host_create(NULL, 1, 2, 0, 0);
     if (Client::client == NULL){
@@ -227,7 +228,8 @@ void Client::receiveData(gameState& state){
                 state.otherPlayers[i].animationStep = network_otherPlayers[i].animationStep;
             }
 
-            state.numPlayerSprites = numPlayers;
+            state.numPlayers = numPlayers;
+            state.fullNumSprites = state.numSprites + state.numPlayers;
             state.sprites.resize(state.numSprites + numPlayers);
             // Add sprites for the players
             for (int i = 0; i < numPlayers; i++){

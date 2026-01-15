@@ -118,14 +118,14 @@ bool loadImage(textureType type, const std::string& path, int id = 0) {
 
 // Create the lineMap from the legacy cubes map (FOR TESTING)
 void cubeToLines(gameState& state){
-    int width = state.map.size();
-    int height = state.map[0].size();
+    int height = state.map.size();
+    int width = state.map[0].size();
 
     // 4 lines -> 2 offsets for the 2 points, stored in x,y order
     int lineOffsets[4][4] = {{0, 0, 1, 0}, {1, 0, 1, 1}, {1, 1, 0, 1}, {0, 1, 0, 0}};
     // For each cube create 4 lines
-    for (int x = 0; x < width; x++){
-        for (int y = 0; y < height; y++){
+    for (int y = 0; y < height; y++){
+        for (int x = 0; x < width; x++){
             if (state.map[x][y] == 0) continue;
 
             for (int i = 0; i < 4; i++){
@@ -205,7 +205,32 @@ int main(int argc, char* argv[]){
     // Player
     loadImage(TEXTURE_PLAYER, "pics/player.png");
 
-    if (initShaders(window, state.lineMap, wallTextures, playerTextures, playerRunTextures, spriteTextures) == -1) return 0;
+    // Convert the 3 different sprite texture arrays into one flattened one (0 - 32 -> player run textures, 32 - 40 -> player textures, 
+    // 40 - x -> sprite textures)
+    int numRunTexs = playerRunTextures.size() * playerRunTextures[0].size();
+    int fullNumSprites = playerTextures.size() + numRunTexs + spriteTextures.size();
+    std::vector<Texture> allSpriteTextures(fullNumSprites);
+
+    // Run texs
+    for (int i = 0; i < 4; i++){
+        for (int j = 0; j < 8; j++){
+            int flatIndex = i * 8 + j;
+            allSpriteTextures[flatIndex] = playerRunTextures[i][j];
+        }
+    }
+    // Standing texs
+    for (int i = 0; i < 8; i++){
+        allSpriteTextures[32 + i] = playerTextures[i];
+    }
+    // Normal sprite textures
+    for (int i = 0; i < spriteTextures.size(); i++){
+        allSpriteTextures[40 + i] = spriteTextures[i];
+    }
+
+    state.wallTextures = wallTextures;
+    state.spriteTextures = allSpriteTextures;
+    state.numSprites = fullNumSprites;
+    if (initShaders(window, state) == -1) return 0;
 
     TTF_Font* font = TTF_OpenFont("Roboto_Condensed-Black.ttf", 20);
 
@@ -371,7 +396,7 @@ int main(int argc, char* argv[]){
         rect = GPURenderText(font, "Username: " + state.player.username, {rect.x, rect.y}, {255, 255, 255, 255});
 
         rect.y += rect.h + 10;
-        rect = GPURenderText(font, "Ping (ms): " + std::to_string(ping.getAvgTime()), {rect.x, rect.y}, {255, 255, 255, 255});
+        rect = GPURenderText(font, "Ping (ms): " + std::to_string(ping.getTime()), {rect.x, rect.y}, {255, 255, 255, 255});
 
         SDL_GL_SwapWindow(window);
 

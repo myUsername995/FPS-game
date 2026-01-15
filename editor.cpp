@@ -62,8 +62,6 @@ struct Sprite {
 std::vector<Texture> texture;
 std::vector<Texture> spriteTextures;
 
-Uint32 buffer[MAX_WINDOW_HEIGHT][MAX_WINDOW_WIDTH];
-
 SDL_FPoint world_to_screen(const SDL_FPoint& p, const double& zoom, const SDL_FPoint& top_left){
     return {float((p.x - top_left.x) / zoom), float((p.y - top_left.y) / zoom)};
 }
@@ -496,7 +494,6 @@ int main(int argc, char* argv[]){
                                 for (int i = 0; i < sprites.size(); i++){
                                     sprites[i].pos.x *= gridWidth;
                                     sprites[i].pos.y *= gridHeight;
-                                    sprites[i].texture -= texture.size();
                                 }
 
                                 loadFile = false;
@@ -507,7 +504,7 @@ int main(int argc, char* argv[]){
                                 for (int i = 0; i < sprites.size(); i++){
                                     fileSprites[i].pos.x = sprites[i].pos.x / gridWidth;
                                     fileSprites[i].pos.y = sprites[i].pos.y / gridHeight;
-                                    fileSprites[i].texture = sprites[i].texture + texture.size();
+                                    fileSprites[i].texture = sprites[i].texture;
                                 }
 
                                 writeMapData(filePath, map, fileSprites);

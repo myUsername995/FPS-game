@@ -2,50 +2,47 @@
 
 layout(local_size_x = 256, local_size_y = 1) in;
 
-layout(std430, binding = 1) buffer wallRangesBuffer {
-    vec2 wallRanges[];
+struct columnData {
+    vec4 texCoord;
+    ivec2 wallRange;
+    int texture;
 };
 
-// Stores: startTexX, stepX (0), startTexY, stepY
-layout(std430, binding = 2) buffer texCoordsBuffer {
-    vec4 texCoords[];
-};
-
-// The output texture for each column
-layout(std430, binding = 4) readonly buffer textureColumnsBuffer {
-    uint textureColumns[];
+layout(std430, binding = 0) buffer columnBuf {
+    columnData columns[];
 };
 
 layout(binding = 0, rgba8) writeonly uniform image2D outImage;  // Output image
 
 // UNIFORMS
 uniform sampler2D textures[9];
-uniform uint WINDOW_WIDTH;
-uniform uint WINDOW_HEIGHT;
+uniform int WINDOW_WIDTH;
+uniform int WINDOW_HEIGHT;
 uniform float texWidth;
 uniform float texHeight;
 
 void main() {
-    uint x = gl_GlobalInvocationID.x;
+    int x = int(gl_GlobalInvocationID.x);
 
     if (x >= WINDOW_WIDTH){
         return;
     }
 
-    vec2 wall = wallRanges[x];
+    columnData curColumn = columns[x];
+
+    vec2 wall = curColumn.wallRange;
     bool noCollision = wall.x == 0 && wall.y == 0;
 
     if (noCollision){
         return;
     }
 
-    float texX = texCoords[x].x;
-    float stepX = texCoords[x].y;     // Unused
-    float texY = texCoords[x].z;
-    float stepY = texCoords[x].w;
+    float texX = curColumn.texCoord.x;
+    float texY = curColumn.texCoord.z;
+    float stepY = curColumn.texCoord.w;
 
     // The texture of the current column
-    uint textureIdx = 3;
+    int textureIdx = 3;
 
     for (int y = int(wall.x); y < int(wall.y); y++){
         vec2 texCoord;

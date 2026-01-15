@@ -2,13 +2,14 @@
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
-layout(std430, binding = 1) buffer wallRangesBuffer {
-    vec2 wallRanges[];
+struct columnData {
+    vec4 texCoord;
+    ivec2 wallRange;
+    int texture;
 };
 
-// Stores: startTexX, stepX (0), startTexY, stepY
-layout(std430, binding = 2) buffer texCoordsBuffer {
-    vec4 texCoords[];
+layout(std430, binding = 0) buffer columnBuf {
+    columnData columns[];
 };
 
 layout(binding = 0, rgba8) writeonly uniform image2D outImage;  // Output image
@@ -18,19 +19,20 @@ uniform sampler2D textures[9];
 uniform vec2 lookDir;        // Look direction of our player (normalized)
 uniform vec2 camera;         // Camera plane vector
 uniform vec2 playerPos;      // Position of the player
-uniform uint WINDOW_WIDTH;
-uniform uint WINDOW_HEIGHT;
+uniform int WINDOW_WIDTH;
+uniform int WINDOW_HEIGHT;
 
 void main() {
-    uint x = gl_GlobalInvocationID.x;
-    uint y = gl_GlobalInvocationID.y;
+    int x = int(gl_GlobalInvocationID.x);
+    int y = int(gl_GlobalInvocationID.y);
 
     if (x >= WINDOW_WIDTH || y >= WINDOW_HEIGHT){
-        imageStore(outImage, ivec2(int(x), int(y)), vec4(1, 1, 1, 1));
         return;
     }
 
-    vec2 wall = wallRanges[x];
+    columnData curColumn = columns[x];
+
+    vec2 wall = curColumn.wallRange;
     bool noCollision = wall.x == 0 && wall.y == 0;
 
     // Check if the current pixel is a ceiling, either: 
@@ -40,10 +42,9 @@ void main() {
         return;
     }
 
-    float startTexX = texCoords[x].x;
-    float stepX = texCoords[x].y;     // Unused
-    float stepY = texCoords[x].w;
-    float startTexY = texCoords[x].z;
+    float startTexX = curColumn.texCoord.x;
+    float stepY = curColumn.texCoord.w;
+    float startTexY = curColumn.texCoord.z;
 
     // Floor texture mapping
     float rayDirX0 = lookDir.x - camera.x;

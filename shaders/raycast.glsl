@@ -29,29 +29,27 @@ bool raySegmentIntersect(vec2 rayOrigin, vec2 rayDir, vec2 segA, vec2 segB, out 
     return false;
 }
 
-layout(std430, binding = 0) readonly buffer worldLines {
-    vec2 lines[]; // Array of line segment points (pairs of vec2)
+struct columnData {
+    vec4 texCoord;
+    ivec2 wallRange;
+    int texture;
 };
 
-layout(std430, binding = 1) buffer wallRangesBuffer {
-    vec2 wallRanges[];
+struct lineData {
+    vec2 p1;
+    vec2 p2;
+    int texture;
 };
 
-layout(std430, binding = 2) buffer texCoordsBuffer {
-    vec4 texCoords[];
+layout(std430, binding = 0) buffer lineBuf {
+    lineData lines[];
 };
 
-// The texture index for each line
-layout(std430, binding = 3) buffer textureLinesBuffer {
-    uint textureLines[];
+layout(std430, binding = 1) buffer columnBuf {
+    columnData columns[];
 };
 
-// The output texture for each column
-layout(std430, binding = 4) buffer textureColumnsBuffer {
-    uint textureColumns[];
-};
-
-layout(std430, binding = 5) buffer depthBufferBuf {
+layout(std430, binding = 2) buffer depthBufferBuf {
     float depthBuffer[];
 };
 
@@ -59,15 +57,15 @@ uniform uint numLines;       // Number of lines on the map
 uniform vec2 lookDir;        // Look direction of our player (normalized)
 uniform vec2 camera;         // Camera plane vector
 uniform vec2 playerPos;      // Position of the player
-uniform uint WINDOW_WIDTH;
-uniform uint WINDOW_HEIGHT;
+uniform int WINDOW_WIDTH;
+uniform int WINDOW_HEIGHT;
 uniform float texWidth;
 uniform float texHeight;
 
 layout(binding = 0, rgba8) writeonly uniform image2D outImage;  // Output image
 
 void main() {
-    uint x = gl_GlobalInvocationID.x;
+    int x = int(gl_GlobalInvocationID.x);
 
     if (x >= WINDOW_WIDTH){
         return;
@@ -81,13 +79,15 @@ void main() {
 
     // Find closest intersection
     float closestDistSq = 1e30;
-    uint closestLineIndex = uint(-1);
+    int closestLineIndex = -1;
     vec2 closestIntersection = vec2(0.0);
 
-    for (uint i = 0; i < numLines; i++) {
+    for (int i = 0; i < numLines; i++) {
+        lineData line = lines[i];
+
         vec2 intersectionP;
-        vec2 segA = lines[i * 2];
-        vec2 segB = lines[i * 2 + 1];
+        vec2 segA = line.p1;
+        vec2 segB = line.p2;
 
         if (raySegmentIntersect(playerPos, ray, segA, segB, intersectionP)) {
             vec2 diff = intersectionP - playerPos;
@@ -102,11 +102,13 @@ void main() {
     }
 
     // If no hit, just clear column (e.g., black)
-    if (closestLineIndex == uint(-1)) {
-        wallRanges[x] = vec2(0, 0);         // (0, 0) indicates no collision
-        textureColumns[x] = 0;
+    if (closestLineIndex == -1) {
+        columns[x].wallRange = ivec2(0, 0);         // (0, 0) indicates no collision
+        columns[x].texture = 0;
         return;
     }
+    
+    lineData curLine = lines[closestLineIndex];
 
     // True distance to wall
     float dist = sqrt(closestDistSq);
@@ -129,14 +131,14 @@ void main() {
     uint yStart = uint(max(startDraw, 0.0));
     uint yEnd   = uint(min(endDraw, float(WINDOW_HEIGHT - 1)));
 
-    wallRanges[x] = vec2(yStart, yEnd);
+    columns[x].wallRange = ivec2(yStart, yEnd);
 
-    uint curTexture = textureLines[closestLineIndex];
-    textureColumns[x] = curTexture;
+    int curTexture = curLine.texture;
+    columns[x].texture = curTexture;
 
     // Compute texture X coordinate (0..1) along the wall
-    vec2 wallStart = lines[closestLineIndex * 2];
-    vec2 wallEnd   = lines[closestLineIndex * 2 + 1];
+    vec2 wallStart = curLine.p1;
+    vec2 wallEnd   = curLine.p2;
     vec2 wallDir   = wallEnd - wallStart;
     vec2 hitDiff   = closestIntersection - wallStart;
 
@@ -148,5 +150,5 @@ void main() {
     float stepY = float(texHeight) / lineHeight;
     float texY  = (float(yStart) - startDraw) * stepY;
 
-    texCoords[x] = vec4(texX, 0, texY, stepY);
+    columns[x].texCoord = vec4(texX, 0, texY, stepY);
 }

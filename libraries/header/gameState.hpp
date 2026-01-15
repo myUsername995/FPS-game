@@ -85,12 +85,12 @@ class Player {
 };
 
 struct Sprite {
+    // General sprite attributes
     SDL_FPoint pos;
     int texture;
 
-    // Show other players as sprites
-    bool isPlayer = false;
-    int index = 0;
+    bool isPlayer;      // Determine if the current sprite is a player, then we need to find the player infos in the ohterPlayers array
+    int index;          // An index into the otherPlayers array
 };
 
 struct Line {
@@ -104,6 +104,7 @@ struct Texture {
     int width, height;
 };
 
+// The state of our game
 struct gameState {
     Player player;
     std::vector<Player> otherPlayers;
@@ -111,6 +112,12 @@ struct gameState {
     // The server sends the map to each client on start-up
     std::vector<Line> lineMap;
     std::vector<std::vector<int>> map;          // An array of X cordinates which store Y cordinates
-    std::vector<Sprite> sprites;
-    int numSprites, numPlayerSprites;
+    std::vector<Sprite> sprites;                // The data about sprites
+    int numSprites;
+    int numPlayers;
+    int fullNumSprites; // numSprites + numPlayers
+
+    // The textures of sprites
+    std::vector<Texture> wallTextures;
+    std::vector<Texture> spriteTextures;        // Sprite textures include players too
 };

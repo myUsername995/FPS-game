@@ -39,7 +39,7 @@ layout (rgba8, binding = 0) writeonly uniform image2D outImage;
 // spriteTextures -> different array
 
 // UNIFORMS
-
+uniform sampler2D spriteTextures[3];
 uniform sampler2DArray playerTextures;
 
 uniform vec2 playerPos;
