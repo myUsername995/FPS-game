@@ -158,10 +158,11 @@ void writeMapData(std::string fileName, const std::vector<std::vector<Tile>>& ma
 
     for (uint32_t i = 0; i < width; i++){
         for (uint32_t j = 0; j < height; j++){
-            if (map[i][j].type == WALL){
-                out.write((char*)&map[i][j].wallTex, sizeof(int));
+            Tile curTile = map[(width - 1) - i][j];
+            if (curTile.type == WALL){
+                out.write((char*)&curTile.wallTex, sizeof(int));
             }
-            else if (map[i][j].type == NONE){
+            else if (curTile.type == NONE){
                 int val = 0;
                 out.write((char*)&val, sizeof(int));
             }
@@ -169,7 +170,8 @@ void writeMapData(std::string fileName, const std::vector<std::vector<Tile>>& ma
     }
 
     for (auto& s : sprites) {
-        out.write((char*)&s.pos.x, sizeof(float));
+        float newX = width - s.pos.x;
+        out.write((char*)&newX, sizeof(float));
         out.write((char*)&s.pos.y, sizeof(float));
         out.write((char*)&s.texture, sizeof(int32_t));
     }
@@ -197,17 +199,19 @@ void readMapData(std::string fileName, std::vector<std::vector<Tile>>& map, std:
 
     in.read((char*)flattenedMap.data(), width * height * sizeof(int));
 
-    for (int i = 0; i < width * height; i++){
-        int x = i % width;
-        int y = i / width;
+    for (int i = 0; i < width; i++){
+        for (int j = 0; j < height; j++){
+            int flatIndex = i * height + j;
+            Tile& curTile = map[(width - 1) - i][j];
 
-        if (flattenedMap[i] == 0){
-            map[y][x].type = NONE;
-            map[y][x].wallTex = 0;
-        }
-        else {
-            map[y][x].type = WALL;
-            map[y][x].wallTex = flattenedMap[i];
+            if (flattenedMap[flatIndex] == 0){
+                curTile.type = NONE;
+            }
+            else {
+                curTile.type = WALL;
+            }
+
+            curTile.wallTex = flattenedMap[flatIndex];
         }
     }
 
@@ -227,7 +231,7 @@ void readMapData(std::string fileName, std::vector<std::vector<Tile>>& map, std:
     }
 
     for (int i = 0; i < numSprites; i++){
-        sprites[i].pos.x = tempSprites[i].x;
+        sprites[i].pos.x = width - tempSprites[i].x;
         sprites[i].pos.y = tempSprites[i].y;
         sprites[i].texture = tempSprites[i].texture;
     }

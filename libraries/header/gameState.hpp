@@ -117,6 +117,10 @@ struct gameState {
     int numPlayers;
     int fullNumSprites; // numSprites + numPlayers
 
+    // Debug variables
+    double xRange = 0;
+    double yRange = 0;
+
     // The textures of sprites
     std::vector<Texture> wallTextures;
     std::vector<Texture> spriteTextures;        // Sprite textures include players too

@@ -1,0 +1,3 @@
+"C:\Program Files\CMake\bin\cmake.exe" -E rm -f CMakeFiles\raycast.dir/objects.a
+C:\msys64\ucrt64\bin\ar.exe qc CMakeFiles\raycast.dir/objects.a @CMakeFiles\raycast.dir\objects1.rsp
+C:\msys64\ucrt64\bin\c++.exe  -O3 -g -Wl,--whole-archive CMakeFiles\raycast.dir/objects.a -Wl,--no-whole-archive -o C:\Files\Cpp_files\silly\MultiplayerFPS\raycast.exe -Wl,--out-implib,libraycast.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\raycast.dir\linkLibs.rsp

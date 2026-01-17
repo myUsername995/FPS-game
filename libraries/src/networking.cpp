@@ -1,5 +1,6 @@
 #include "networking.hpp"
 #include <iostream>
+#include <cassert>
 
 // Used for sending data over the network
 struct Network_player {
@@ -102,8 +103,8 @@ bool Client::connectToServer(gameState& state, std::string serverIP){
                     memcpy(arr.data(), event.packet->data, event.packet->dataLength);
 
                     for (int i = 0; i < width * height; i++){
-                        int x = i % width;
-                        int y = i / width;
+                        int x = i / width;
+                        int y = i % width;
 
                         state.map[x][y] = arr[i];
                     }
@@ -114,6 +115,7 @@ bool Client::connectToServer(gameState& state, std::string serverIP){
                     memcpy(&numSprites, event.packet->data, event.packet->dataLength);
 
                     state.numSprites = numSprites;
+                    state.fullNumSprites = numSprites;
                     state.sprites.resize(numSprites);
                 }
                 // Sprites data
@@ -206,6 +208,8 @@ void Client::receiveData(gameState& state){
             network_otherPlayers.resize(numPlayers); // allocate space
             state.otherPlayers.resize(numPlayers);
 
+            assert(network_otherPlayers.size() * sizeof(Network_player) == event.packet->dataLength && 
+                   "networking.cpp: Network_player size is wrong.");
             memcpy(network_otherPlayers.data(), event.packet->data, event.packet->dataLength);
 
             // Remove our own player from the otherPlayers array
@@ -230,7 +234,7 @@ void Client::receiveData(gameState& state){
 
             state.numPlayers = numPlayers;
             state.fullNumSprites = state.numSprites + state.numPlayers;
-            state.sprites.resize(state.numSprites + numPlayers);
+            state.sprites.resize(state.fullNumSprites);
             // Add sprites for the players
             for (int i = 0; i < numPlayers; i++){
                 Sprite newSprite;

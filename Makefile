@@ -8,18 +8,18 @@ CXXFLAGS = -O3 -g
 # Common include paths
 # =========================
 COMMON_INCLUDES = \
-	-I"C:/Files/.vscode/myLibraries/include" \
-	-I"C:/Files/.vscode/myLibraries/libraries/header"
+	-I"C:/Files/myLibraries/include" \
+	-I"C:/Files/myLibraries/libraries/header"
 
 RAYCAST_INCLUDES = \
 	-I"./libraries/header" \
-	-I"C:/Files/.vscode/myLibraries"
+	-I"C:/Files/myLibraries"
 
 # =========================
 # Common libraries
 # =========================
 COMMON_LIBS = \
-	-L"C:/Files/.vscode/myLibraries/lib" \
+	-L"C:/Files/myLibraries/lib" \
 	-lSDL3 -lSDL3_ttf -lSDL3_image \
 
 # =========================
@@ -31,10 +31,10 @@ ENET_LIBS     = -L"./enet-1.3.18" -lenet64 -lws2_32 -lwinmm
 # =========================
 # Shared source
 # =========================
-TIME_SRC = C:/Files/.vscode/myLibraries/libraries/src/time.cpp
+TIME_SRC = C:/Files/myLibraries/libraries/src/time.cpp
 NETWORKING_SRC = ./libraries/src/networking.cpp
-RENDERING_SRC = ./libraries/src/render.cpp C:/Files/.vscode/myLibraries/libraries/src/GPU.cpp \
-				C:/Files/.vscode/myLibraries/glad/glad.c
+RENDERING_SRC = ./libraries/src/render.cpp C:/Files/myLibraries/libraries/src/GPU.cpp \
+				C:/Files/myLibraries/glad/glad.c
 
 # =========================
 # Targets

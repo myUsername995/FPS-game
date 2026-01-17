@@ -20,11 +20,13 @@ uniform int WINDOW_WIDTH;
 uniform int WINDOW_HEIGHT;
 uniform float texWidth;
 uniform float texHeight;
+uniform int xRange;
+uniform int yRange;
 
 void main() {
     int x = int(gl_GlobalInvocationID.x);
 
-    if (x >= WINDOW_WIDTH){
+    if (x >= WINDOW_WIDTH || x >= xRange){
         return;
     }
 
@@ -42,16 +44,16 @@ void main() {
     float stepY = curColumn.texCoord.w;
 
     // The texture of the current column
-    int textureIdx = 3;
+    int textureIdx = curColumn.texture;
+    float maxY = clamp(yRange, wall.x, wall.y);
 
-    for (int y = int(wall.x); y < int(wall.y); y++){
-        vec2 texCoord;
+    for (int y = int(wall.x); y < int(maxY); y++){
+        texX = clamp(texX, 0, texWidth - 1);
+        texY = clamp(texY, 0, texHeight - 1);
         float normalizedX = texX / texWidth;
         float normalizedY = texY / texHeight;
-        texCoord.x = clamp(normalizedX, 0.0, 1.0);
-        texCoord.y = clamp(normalizedY, 0.0, 1.0);
 
-        vec4 color = texture(textures[int(textureIdx-2)], texCoord);
+        vec4 color = texture(textures[int(textureIdx)], vec2(normalizedX, normalizedY));
 
         imageStore(outImage, ivec2(int(x), int(y)), color);
 

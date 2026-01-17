@@ -62,8 +62,6 @@ uniform int WINDOW_HEIGHT;
 uniform float texWidth;
 uniform float texHeight;
 
-layout(binding = 0, rgba8) writeonly uniform image2D outImage;  // Output image
-
 void main() {
     int x = int(gl_GlobalInvocationID.x);
 

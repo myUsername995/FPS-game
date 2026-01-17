@@ -1,3 +1,16 @@
+/*
+INTRODUCTION: A raycaster that renders on the GPU, allows multiplayer and other stuff.
+
+Dependencies:
+-SDL3, SDL3_image, SDL3_ttf
+-ENet
+-C++ standard library
+-GPU.hpp (my own silly library)
+-glad
+
+*/
+
+
 #include <SDL3/SDL.h>               // Rendering to windows
 #include <SDL3/SDL_main.h>
 #include <SDL3_ttf/SDL_ttf.h>
@@ -21,7 +34,7 @@ int WINDOW_HEIGHT = 800;
 int WINDOW_WIDTH = 800;
 
 float PI = 3.14159;
-std::string serverIP = "192.168.0.99";
+std::string serverIP = "127.0.0.1";
 
 // Textures of the sprites and walls
 std::vector<Texture> wallTextures;
@@ -124,17 +137,17 @@ void cubeToLines(gameState& state){
     // 4 lines -> 2 offsets for the 2 points, stored in x,y order
     int lineOffsets[4][4] = {{0, 0, 1, 0}, {1, 0, 1, 1}, {1, 1, 0, 1}, {0, 1, 0, 0}};
     // For each cube create 4 lines
-    for (int y = 0; y < height; y++){
-        for (int x = 0; x < width; x++){
+    for (int x = 0; x < width; x++){
+        for (int y = 0; y < height; y++){
             if (state.map[x][y] == 0) continue;
 
             for (int i = 0; i < 4; i++){
                 Line newLine;
-                newLine.p1.x = x + lineOffsets[i][0];
-                newLine.p1.y = y + lineOffsets[i][1];
-                newLine.p2.x = x + lineOffsets[i][2];
-                newLine.p2.y = y + lineOffsets[i][3];
-                newLine.texture = state.map[x][y]+1;
+                newLine.p1.x = (x + lineOffsets[i][0]);
+                newLine.p1.y = (y + lineOffsets[i][1]);
+                newLine.p2.x = (x + lineOffsets[i][2]);
+                newLine.p2.y = (y + lineOffsets[i][3]);
+                newLine.texture = state.map[x][y]-1;
 
                 state.lineMap.push_back(newLine);
             }
@@ -173,7 +186,8 @@ int main(int argc, char* argv[]){
     double FOV = 90.0;
     gameState state;
     state.player = Player({5, 5}, Vector(1, 1), FOV * (PI / 180.0));
-
+    
+    // Connecting to the server
     Client connection;
     if (!connection.connectToServer(state, serverIP)) return 0;
 
@@ -229,7 +243,6 @@ int main(int argc, char* argv[]){
 
     state.wallTextures = wallTextures;
     state.spriteTextures = allSpriteTextures;
-    state.numSprites = fullNumSprites;
     if (initShaders(window, state) == -1) return 0;
 
     TTF_Font* font = TTF_OpenFont("Roboto_Condensed-Black.ttf", 20);
@@ -251,6 +264,8 @@ int main(int argc, char* argv[]){
     Clk clock;
     bool run = true;
 
+    double stepRange = 10;
+
     while (run){
         clock.begin();
         GPUClearScreen();
@@ -268,6 +283,25 @@ int main(int argc, char* argv[]){
                     resizeShaders(window);
                     break;
                 }
+                case SDL_EVENT_KEY_DOWN: {
+                    std::cout << state.xRange << " " << state.yRange << std::endl;
+                    if (event.key.key == SDLK_RIGHT){
+                        // If Y is about to wrap around, step X to the next wall
+                        if ((state.yRange + stepRange) >= WINDOW_HEIGHT){
+                            state.xRange = fmod(state.xRange + stepRange, WINDOW_WIDTH);
+                        }
+                        state.yRange = fmod(state.yRange + stepRange, WINDOW_HEIGHT);
+                    }
+                    if (event.key.key == SDLK_LEFT){
+                        if ((state.yRange - stepRange) <= 0){
+                            state.xRange -= stepRange;
+                            if (state.xRange <= 0) state.xRange = WINDOW_WIDTH;
+                        }
+                        state.yRange -= stepRange;
+                        if (state.yRange <= 0) state.yRange = WINDOW_HEIGHT;
+                    }
+                    break;
+                }
                 case SDL_EVENT_MOUSE_BUTTON_DOWN: {
                     if (event.button.button == SDL_BUTTON_RIGHT){
                         rightMouseButtonDown = true;
@@ -282,6 +316,7 @@ int main(int argc, char* argv[]){
                     break;
                 }
                 case SDL_EVENT_MOUSE_WHEEL: {
+                    stepRange += event.wheel.y;
                     playerSpeed += event.wheel.y * playerSpeed / 20;
 
                     // Make the animation faster as the player gets faster
@@ -354,12 +389,6 @@ int main(int argc, char* argv[]){
             state.player.lookDir.rotate(rotSpeed);
             state.player.camera.rotate(rotSpeed);
         }
-
-        // Only send packets if something changed
-        // if (cameraChanged || state.player.isMoving){
-        //     // Send the new state of the player to the server
-        //     connection.sendData(state);
-        // }
 
         // Determine if the player is moving or not
         if (numKeysPressed > 0){

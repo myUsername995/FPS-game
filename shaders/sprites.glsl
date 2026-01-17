@@ -1,22 +1,28 @@
 #version 430
 
-layout (local_size_x = 16, local_size_y = 16) in;
+layout (local_size_x = 16, local_size_y = 1) in;
 
 struct spriteData {
-    // General data
+    float invisColor[3]; // vec3 is padded to vec4 in 430, so just use float[3]
     vec2 pos;
     uint width;
     uint height;
-
-    // playerData
-    vec2 lookDir;
-    uint isMoving;
-    uint animationStep;
-    
-    // Sprite specific data
     uint texture;
 
     uint isPlayer;
+};
+
+// The results from the calculations done by spriteCompute
+struct spriteResult {
+    // World attributes
+    float spriteScreenX;
+    float transformY;
+    float spriteWidth;
+    float spriteHeight;
+
+    // Texture attributes
+    float spriteTexWidth;
+    float spriteTexHeight;
 };
 
 layout(std430, binding = 0) buffer spriteBuf {
@@ -30,6 +36,14 @@ layout(std430, binding = 1) buffer ZBufferBuf {
 
 layout(std430, binding = 2) buffer sortedIndexesBuffer {
     int sortedIndexes[];
+};
+
+layout(std430, binding = 3) buffer boundingBoxesBuf {
+    vec4 boundingBoxes[];
+};
+
+layout(std430, binding = 4) buffer spriteResultsbuf {
+    spriteResult spriteResults[];
 };
 
 layout (rgba8, binding = 0) writeonly uniform image2D outImage;
@@ -52,90 +66,46 @@ uniform int WINDOW_HEIGHT;
 
 void main() {
     int x = int(gl_GlobalInvocationID.x);
-    int y = int(gl_GlobalInvocationID.y);
 
-    if (x >= WINDOW_WIDTH || y >= WINDOW_HEIGHT){
+    if (x >= WINDOW_WIDTH){
         return;
     }
 
-    for (int i = 0; i < numSprites; i++){
-        // These are the attributes that differ between a player and a sprite texture
-        vec3 invisColor; // RGB (alpha doesn't matter)
-        uint textureIdx;
-
-        // General sprite attributes
-        spriteData sprite = sprites[sortedIndexes[i]];
-
-        vec2 spritePos = sprite.pos;
-        float spriteTexWidth = sprite.width;
-        float spriteTexHeight = sprite.height;
-
-        // Load sprite textures width and height
-        if (sprite.isPlayer == 0){
-            textureIdx = sprite.texture;
-            invisColor = vec3(0,0,0);         // Black
+    for (int i = 0; i < 20; i++){
+        if (mod(i, 5) == 0){
+            //imageStore(outImage, ivec2(int(x), int(i * 10)), vec4(1,0,0,1));
         }
-        // Calculate the right textureIdx to show the right player
         else {
-            invisColor = vec3(152.0/255.0, 0.0, 136.0/255.0);   // Purple (background of player sprites)
-
-            vec2 spriteDir = normalize(sprite.lookDir);
-            vec2 toCamera;
-            toCamera.x = playerPos.x - spritePos.x;
-            toCamera.y = playerPos.y - spritePos.y;
-            toCamera = normalize(toCamera);
-
-            float angle = atan(
-                spriteDir.x * toCamera.y - spriteDir.y * toCamera.x, // 2D cross
-                dot(spriteDir, toCamera)                              // dot product
-            );
-
-            float degree = angle * 180.0 / 3.14159;
-            if (degree < 0) degree += 360;
-
-            uint playerTexture = uint(mod(uint((degree + 22.5) / 45.0), 8));
-
-            // Moving player texture
-            if (sprite.isMoving){
-                textureIdx = sprite.animationStep * 8 + playerTexture;
-            }
-            // Standing player texture
-            else {
-                textureIdx = 32 + playerTexture;
-            }
+            //imageStore(outImage, ivec2(int(x), int(i * 10)), vec4(0,1,0,1));
         }
+    }
 
-        float spriteX = spritePos.x - playerPos.x;
-        float spriteY = spritePos.y - playerPos.y;
+    for (int i = 0; i < numSprites; i++){
+        spriteData sprite = sprites[sortedIndexes[i]];
+        uint textureIdx = sprite.texture;
+        vec3 invisColor = vec3(sprite.invisColor[0], sprite.invisColor[1], sprite.invisColor[2]);
 
-        float invDet = 1.0 / (camera.x * lookDir.y - lookDir.x * camera.y);
+        vec4 box = boundingBoxes[sortedIndexes[i]];
+        spriteResult result = spriteResults[sortedIndexes[i]];
 
-        float transformX = invDet * (lookDir.y * spriteX - lookDir.x * spriteY);
-        float transformY = invDet * (-camera.y * spriteX + camera.x * spriteY);
+        float spriteScreenX = result.spriteScreenX;
+        float transformY = result.transformY;
+        float spriteWidth = result.spriteWidth;
+        float spriteHeight = result.spriteHeight;
 
-        int spriteScreenX = int((WINDOW_WIDTH / 2) * (1 + transformX / transformY));
+        float spriteTexWidth = result.spriteTexWidth;
+        float spriteTexHeight = result.spriteTexHeight;
 
-        // Calculate height of the sprite on screen
-        int spriteHeight = int(abs((WINDOW_HEIGHT / transformY))); // Using 'transformY' instead of the real distance prevents fisheye
-        int drawStartY = WINDOW_HEIGHT / 2 - spriteHeight / 2;
-        if (drawStartY < 0) drawStartY = 0;
-        int drawEndY = WINDOW_HEIGHT / 2 + spriteHeight  / 2;
-        if (drawEndY >= WINDOW_HEIGHT) drawEndY = WINDOW_HEIGHT;
+        float drawStartX = box.x;
+        float drawStartY = box.y;
+        float drawEndX = box.z;
+        float drawEndY = box.w;
 
-        // Calculate width of the sprite
-        int spriteWidth = int(abs((WINDOW_HEIGHT / transformY)));
-        int drawStartX = spriteScreenX - spriteWidth / 2;
-        if (drawStartX < 0) drawStartX = 0;
-        int drawEndX = spriteScreenX + spriteWidth / 2;
-        if (drawEndX >= WINDOW_WIDTH) drawEndX = WINDOW_WIDTH - 1;
-
-        // Check if the sprites current pixel is visible
-        if (x >= drawStartX && x < drawEndX && y >= drawStartY && y < drawEndY){
+        // Check if the sprites current pixel is visible + 
+        if (x >= drawStartX && x < drawEndX && transformY > 0 && transformY < ZBuffer[x]){
             // Loop through every vertical stripe of the sprite on screen
-            int texX = int((x + spriteWidth / 2 - spriteScreenX) * spriteTexWidth / spriteWidth);
-
-            // Is the sprite infront of the camera and is it infront of all the walls?
-            if (transformY > 0 && transformY < ZBuffer[x]){
+            for (float y = drawStartY; y < drawEndY; y++){
+                int texX = int((x + spriteWidth / 2 - spriteScreenX) * spriteTexWidth / spriteWidth);
                 int texY = int((((y - WINDOW_HEIGHT / 2 + spriteHeight / 2) * spriteTexHeight) / spriteHeight));
 
                 // Load the color from the image based on the previously set attributes
