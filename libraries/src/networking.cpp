@@ -9,6 +9,8 @@ struct Network_player {
     uint32_t playerID;
     char username[32];
 
+    double ping;
+
     // Player data
     float posX;
     float posY;
@@ -234,6 +236,7 @@ bool Client::receiveData(gameState& state){
                 state.otherPlayers[i].pos.y = network_otherPlayers[i].posY;
                 state.otherPlayers[i].isMoving = network_otherPlayers[i].isMoving == 1 ? true : false;
                 state.otherPlayers[i].animationStep = network_otherPlayers[i].animationStep;
+                state.otherPlayers[i].ping = network_otherPlayers[i].ping;
             }
 
             state.numPlayers = numPlayers;
@@ -267,6 +270,7 @@ void Client::sendData(gameState& state){
     p.posY = state.player.pos.y;
     p.isMoving = state.player.isMoving;
     p.animationStep = state.player.animationStep;
+    p.ping = state.player.ping;
 
     ENetPacket* packet = enet_packet_create(&p, sizeof(p), ENET_PACKET_FLAG_RELIABLE);
 

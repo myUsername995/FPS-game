@@ -82,6 +82,8 @@ class Player {
         // Use this to animate players
         bool isMoving = false;
         int animationStep = 0;
+
+        double ping;
 };
 
 struct Sprite {
@@ -116,10 +118,6 @@ struct gameState {
     int numSprites;
     int numPlayers;
     int fullNumSprites; // numSprites + numPlayers
-
-    // Debug variables
-    double xRange = 0;
-    double yRange = 0;
 
     // The textures of sprites
     std::vector<Texture> wallTextures;

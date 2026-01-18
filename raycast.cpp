@@ -39,8 +39,6 @@ std::array<Texture, 8> playerTextures;
 std::array<std::array<Texture, 8>, 4> playerRunTextures;
 Texture skyTexture;
 
-double ping;
-
 enum textureType {
     TEXTURE_WALL,
     TEXTURE_SPRITE,
@@ -244,16 +242,22 @@ void renderTab(TTF_Font* font, const gameState& state){
     std::vector<Player> allPlayers(state.numPlayers + 1);
     allPlayers[0] = state.player;
     for (int i = 0; i < state.numPlayers; i++) allPlayers[i+1] = state.otherPlayers[i];
-    
-    for (int i = 0; i < state.numPlayers; i++){
+
+    for (int i = 0; i < state.numPlayers + 1; i++){
+        float nameWidth = getWidthAndHeight(font, allPlayers[i].username).first;
+
         // Render each player's name on the tab
+        SDL_FPoint centeredText = {textStart.x, textStart.y + gap / 2};
+        SDL_FPoint pingText = {centeredText.x + nameWidth + 30, centeredText.y};
+
+        GPURenderRect({rectStart.x, rectStart.y, rectWidth, height+10}, {255, 255, 255, 255}, false);
+
+        // Center the text
+        GPURenderText(font, allPlayers[i].username, centeredText, {255, 255, 255, 255});
+        GPURenderText(font, std::to_string(int(allPlayers[i].ping)), pingText, {255, 255, 255, 255});
+
         rectStart.y += height + gap;
         textStart.y += height + gap;
-        SDL_FPoint centeredText = {textStart.x, textStart.y + gap / 2};
-        
-        // Center the text
-        GPURenderText(font, state.otherPlayers[i].username, centeredText, {255, 255, 255, 255});
-        GPURenderRect({rectStart.x, rectStart.y, rectWidth, height+10}, {255, 255, 255, 255}, false);
     }
 }
 
@@ -496,7 +500,7 @@ int main(int argc, char* argv[]){
         // Receive data right before rendering so that we get the most up to date data
         if (connection.receiveData(state)){
             pingTime.end();
-            ping = pingTime.getAvgTime();
+            state.player.ping = pingTime.getTime();
         }
 
         renderMap(window, state);
@@ -516,7 +520,7 @@ int main(int argc, char* argv[]){
         rect = GPURenderText(font, "Speed: " + std::to_string(playerSpeed), {rect.x, rect.y}, {255, 255, 255, 255});
 
         rect.y += rect.h + 10;
-        rect = GPURenderText(font, "Ping: " + std::to_string(ping), {rect.x, rect.y}, {255, 255, 255, 255});
+        rect = GPURenderText(font, "Ping: " + std::to_string(state.player.ping), {rect.x, rect.y}, {255, 255, 255, 255});
 
         SDL_GL_SwapWindow(window);
 

@@ -388,8 +388,6 @@ void fillSpriteArrays(const gameState& state){
             spritesData[i].width = 64;
             spritesData[i].height = 64;
             spritesData[i].isPlayer = 1;
-
-            std::cout << spritesData[i].texture << std::endl;
         }
         // Sprite specific data
         else {

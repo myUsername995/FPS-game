@@ -26,6 +26,8 @@ struct Network_player {
     uint32_t playerID;
     char username[32];
 
+    double ping;
+    
     // Player data
     float posX;
     float posY;
