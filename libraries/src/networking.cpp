@@ -41,6 +41,8 @@ bool Client::connectToServer(gameState& state, std::string serverIP){
         return false;
     }
 
+    std::cout << "Connecting to " << serverIP << "..." << std::endl;
+
     // Try to connect for 5 seconds
     bool connected = false;
     while (enet_host_service(Client::client, &event, 5000) > 0){
