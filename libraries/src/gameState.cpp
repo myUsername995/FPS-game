@@ -1,7 +1,7 @@
 #include "gameState.hpp"
 
 /*
-PUBLIC IP: 89.135.110.128
+PUBLIC IP: haha ur not getting that bozo
 LAN IP: 192.168.0.99
 LOOPBACK IP: 127.0.0.1
 */
