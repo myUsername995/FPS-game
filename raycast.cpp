@@ -39,6 +39,8 @@ std::array<Texture, 8> playerTextures;
 std::array<std::array<Texture, 8>, 4> playerRunTextures;
 Texture skyTexture;
 
+double ping;
+
 enum textureType {
     TEXTURE_WALL,
     TEXTURE_SPRITE,
@@ -225,21 +227,33 @@ bool calculatePlayerHead(const gameState& state, int index, TTF_Font*& font, SDL
 void renderTab(TTF_Font* font, const gameState& state){
     // Get the height of the first username (all other usernames should be the same height)
     std::pair<float, float> userHeights = getWidthAndHeight(font, state.player.username);
-    float height = userHeights.second;
+
+    float gap = 10; // The gap between names
+    float height = userHeights.second; // Height of each username
+    float rectWidth = 200; // width of the tab
+    SDL_Color tabColor = {64, 64, 64, 127};
 
     // Render the background rectangle first
-    float rectWidth = 200;
     SDL_FRect rect;
     rect.x = WINDOW_WIDTH / 2 - rectWidth / 2; rect.y = 0; rect.w = rectWidth; rect.h = (height + 10) * (state.numPlayers + 1);
-    GPURenderRect(rect, {64, 64, 64, 127}, true);
+    GPURenderRect(rect, tabColor, true);
 
-    // Render our name at the top
-    SDL_FPoint midStart = {WINDOW_WIDTH / 2 - rectWidth / 2 + 10, 0};
-    GPURenderText(font, state.player.username, midStart, {255, 255, 255, 255});
+    SDL_FPoint rectStart = {WINDOW_WIDTH / 2 - rectWidth / 2, 0};
+    SDL_FPoint textStart = {rectStart.x + 10, rectStart.y};
+
+    std::vector<Player> allPlayers(state.numPlayers + 1);
+    allPlayers[0] = state.player;
+    for (int i = 0; i < state.numPlayers; i++) allPlayers[i+1] = state.otherPlayers[i];
+    
     for (int i = 0; i < state.numPlayers; i++){
         // Render each player's name on the tab
-        midStart.y += height + 10;
-        GPURenderText(font, state.otherPlayers[i].username, midStart, {255, 255, 255, 255});
+        rectStart.y += height + gap;
+        textStart.y += height + gap;
+        SDL_FPoint centeredText = {textStart.x, textStart.y + gap / 2};
+        
+        // Center the text
+        GPURenderText(font, state.otherPlayers[i].username, centeredText, {255, 255, 255, 255});
+        GPURenderRect({rectStart.x, rectStart.y, rectWidth, height+10}, {255, 255, 255, 255}, false);
     }
 }
 
@@ -353,7 +367,7 @@ int main(int argc, char* argv[]){
     bool rightMouseButtonDown = false;
     SDL_FPoint start_pan = {0, 0};
 
-    Clk clock;
+    Clk clock; Clk pingTime;
     bool run = true;
 
     while (run){
@@ -476,13 +490,14 @@ int main(int argc, char* argv[]){
         float width = state.map.size();
         float height = state.map[0].size();
 
-        Clk ping;
-        ping.begin();
+        pingTime.begin();
         connection.sendData(state);
 
         // Receive data right before rendering so that we get the most up to date data
-        connection.receiveData(state);
-        ping.end();
+        if (connection.receiveData(state)){
+            pingTime.end();
+            ping = pingTime.getAvgTime();
+        }
 
         renderMap(window, state);
 
@@ -501,7 +516,7 @@ int main(int argc, char* argv[]){
         rect = GPURenderText(font, "Speed: " + std::to_string(playerSpeed), {rect.x, rect.y}, {255, 255, 255, 255});
 
         rect.y += rect.h + 10;
-        rect = GPURenderText(font, "Ping (ms): " + std::to_string(ping.getTime()), {rect.x, rect.y}, {255, 255, 255, 255});
+        rect = GPURenderText(font, "Ping: " + std::to_string(ping), {rect.x, rect.y}, {255, 255, 255, 255});
 
         SDL_GL_SwapWindow(window);
 

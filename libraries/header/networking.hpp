@@ -18,6 +18,6 @@ class Client {
 
     bool connectToServer(gameState& state, std::string serverIP);
     void disconnectFromServer();
-    void receiveData(gameState& state);
+    bool receiveData(gameState& state);
     void sendData(gameState& state);
 };

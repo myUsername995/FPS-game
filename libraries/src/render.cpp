@@ -106,17 +106,10 @@ void setMapUniforms(GLuint currentShader){
     glUniform1iv(glGetUniformLocation(currentShader, "textures"), mapUnits.size(), mapUnits.data());
 }
 
-void setWallUniforms(){
-    for (int i = 0; i < glWallTextures.size(); i++){
-        std::string lookUp = "tex" + std::to_string(i);
-        glUniform1i(glGetUniformLocation(wallShader, lookUp.c_str()), i);
-    }
-}
-
 // Set the texture uniforms to the right textures for the sprites
-void setSpriteUniforms(){
+void setSpriteUniforms(GLuint currentShader){
     glUniform1i(glGetUniformLocation(spriteShader, "playerTextures"), 0);
-    glUniform1iv(glGetUniformLocation(spriteShader, "spriteTextures"), spriteUnits.size(), spriteUnits.data());
+    glUniform1iv(glGetUniformLocation(currentShader, "spriteTextures"), spriteUnits.size(), spriteUnits.data());
 }
 
 void activateWallTextures(){
@@ -278,36 +271,25 @@ bool createInputTextures(const std::vector<SDL_Surface*>& wallTextures, const st
 
 // GENERATE TEXTURES FOR WALL, FLOOR AND CEILING SHADER
 void generateMapTextures(std::string& wallStr, std::string& floorStr, std::string& ceilingStr, int numTextures){
+    // The length of a tab
     std::string tab = "    ";
-    std::string uniforms;
-    for (int i = 0; i < numTextures; i++){
-        uniforms += "uniform sampler2D tex" + std::to_string(i) + ";\n";
-    }
 
-    std::string uniformID = "// UNIFORMS\n";
-    int wallUniform = wallStr.find(uniformID) + uniformID.length();
-    wallStr.insert(wallUniform, uniforms);
-
-    std::string switchStatement = tab + tab + "switch(textureIdx){\n" + tab + tab + tab + "case -1: color = vec4(0); break;\n";
-    for (int i = 0; i < numTextures; i++){
-        switchStatement += tab + tab + tab + "case " + std::to_string(i) + ": color = texture(tex" + std::to_string(i) + ", texCoord); break;\n";
-    }
-    switchStatement += tab + tab + "}\n";
-
-    std::string switchID = "// SWITCH STATEMENT\n";
-    int wallSwitch = wallStr.find(switchID) + switchID.length();
-    wallStr.insert(wallSwitch, switchStatement);
-
-    // Insert into the floor and ceiling files now
+    // Insert the uniforms into every string first
     std::string arrSize = std::to_string(numTextures);
-    std::string uniforms2 = "uniform sampler2D textures [" + arrSize + "];";
+    std::string uniforms = "uniform sampler2D textures[" + arrSize + "];";
 
-    std::string uniformID2 = "// UNIFORMS\n";
-    int floorUniform = floorStr.find(uniformID2) + uniformID2.length();
-    int ceilUniform = ceilingStr.find(uniformID2) + uniformID2.length();
+    // Search for the identifier "// UNIFORMS""
+    std::string uniformID = "// UNIFORMS\n";
 
-    floorStr.insert(floorUniform, uniforms2);
-    ceilingStr.insert(ceilUniform, uniforms2);
+    // Find positions
+    int wallUniform = wallStr.find(uniformID) + uniformID.length();
+    int floorUniform = floorStr.find(uniformID) + uniformID.length();
+    int ceilingUniform = ceilingStr.find(uniformID) + uniformID.length();
+
+    // Insert into the right place
+    wallStr.insert(wallUniform, uniforms);
+    floorStr.insert(floorUniform, uniforms);
+    ceilingStr.insert(ceilingUniform, uniforms);
 
     {
         std::ofstream file(shaderFolder + "\\wallChanged.glsl");
@@ -331,7 +313,7 @@ void generateMapTextures(std::string& wallStr, std::string& floorStr, std::strin
 
 // GENERATE TEXTURES FOR SPRITE SHADER
 void generateSpriteTextures(std::string& spriteStr, int numTextures){
-    // The length of a tab
+        // The length of a tab
     std::string tab = "    ";
 
     // Insert the uniforms into every string first
@@ -368,7 +350,7 @@ int calculatePlayerTexIndex(Player& otherPlayer, const gameState& state){
     double deg = angle * 180.0 / PI;
     if (deg < 0) deg += 360;
 
-    int playerTexture = int(((360 - deg) + 22.5) / 45.0) % 8;
+    int playerTexture = (int(((360 - deg) + 22.5) / 45.0) % 8);
 
     // Assign texture
     // Running texture
@@ -406,6 +388,8 @@ void fillSpriteArrays(const gameState& state){
             spritesData[i].width = 64;
             spritesData[i].height = 64;
             spritesData[i].isPlayer = 1;
+
+            std::cout << spritesData[i].texture << std::endl;
         }
         // Sprite specific data
         else {
@@ -636,7 +620,7 @@ void dispatchShader(shaderType type, const gameState& state){
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, glMapColumnsData);
 
         // Set the texture related uniforms
-        setWallUniforms();
+        setMapUniforms(wallShader);
 
         glUniform1i(glGetUniformLocation(wallShader, "WINDOW_WIDTH"), W);
         glUniform1i(glGetUniformLocation(wallShader, "WINDOW_HEIGHT"), H);
@@ -707,7 +691,7 @@ void dispatchShader(shaderType type, const gameState& state){
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, glSpriteResults); 
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, glSpriteResults);
 
-        setSpriteUniforms();
+        setSpriteUniforms(spriteShader);
 
         glUniform1ui(glGetUniformLocation(spriteShader, "numSprites"), numSprites);
         glUniform2f(glGetUniformLocation(spriteShader, "lookDir"), lookDir.x, lookDir.y);
@@ -748,10 +732,8 @@ void dispatchShader(shaderType type, const gameState& state){
     }
 }
 
-Clk map, sprite;
 // Renders walls, floor, ceiling and sprites
 void renderMap(SDL_Window* window, const gameState& state){
-    map.begin();
     // Setup for compute shader dispatches
     glBindImageTexture(0, outputTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
     glClearTexImage(outputTex, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
@@ -766,9 +748,6 @@ void renderMap(SDL_Window* window, const gameState& state){
     dispatchShader(CEILING, state);
 
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
-    map.end();
-
-    sprite.begin();
 
     fillSpriteArrays(state);
     activateSpriteTextures();
@@ -777,7 +756,6 @@ void renderMap(SDL_Window* window, const gameState& state){
 
     // Ensure writes are visible
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
-    sprite.end();
 
     drawTexture(screenShader, outputTex);
 }

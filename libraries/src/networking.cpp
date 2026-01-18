@@ -41,11 +41,11 @@ bool Client::connectToServer(gameState& state, std::string serverIP){
 
     // Try to connect for 5 seconds
     bool connected = false;
-    while (enet_host_service(Client::client, &event, 5000) > 0 &&
-        event.type == ENET_EVENT_TYPE_CONNECT){
-
-        std::cerr << "Succesfully connected to the server.\n";
-        connected = true;
+    while (enet_host_service(Client::client, &event, 5000) > 0){
+        if (event.type == ENET_EVENT_TYPE_CONNECT){
+            std::cerr << "Succesfully connected to the server.\n";
+            connected = true;
+        }
         break;
     }
 
@@ -78,8 +78,6 @@ bool Client::connectToServer(gameState& state, std::string serverIP){
 
                     state.player.playerID = received.playerID;
                     state.player.username = received.username;
-
-                    std::cout << "Our username: " << state.player.username << std::endl;
                 }
                 // Dimensions
                 else if (numPacketsReceived == 1){
@@ -194,13 +192,16 @@ void Client::disconnectFromServer(){
     std::cout << "Disconnected from the server.\n";
 }
 
-void Client::receiveData(gameState& state){
+// Returns whether data was received or not
+bool Client::receiveData(gameState& state){
+    bool received = false;
     ENetEvent event;
     while (enet_host_service(Client::client, &event, 0) > 0){
+        received = true;
         if (event.type == ENET_EVENT_TYPE_DISCONNECT){
             std::cout << "Disconnected from the server.\n";
             
-            return;
+            return false;
         }
         if (event.type == ENET_EVENT_TYPE_RECEIVE){
             // The server sent an std::vector<Network_player>.data() array
@@ -250,6 +251,8 @@ void Client::receiveData(gameState& state){
             }
         }
     }
+
+    return received;
 }
 
 void Client::sendData(gameState& state){

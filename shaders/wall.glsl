@@ -1,4 +1,4 @@
-#version 430 core 
+#version 440 compatibility
 
 layout(local_size_x = 256, local_size_y = 1) in;
 
@@ -12,7 +12,7 @@ layout(std430, binding = 0) buffer columnBuf {
     columnData columns[];
 };
 
-layout(binding = 0, rgba8) writeonly uniform image2D outImage;  // Output image
+layout(binding = 0, rgba8) uniform image2D outImage;  // Output image
 
 // UNIFORMS
 
@@ -45,14 +45,13 @@ void main() {
     int textureIdx = curColumn.texture;
 
     for (int y = int(wall.x); y < int(wall.y); y++){
-        texX = clamp(texX, 0, texWidth - 1);
-        texY = clamp(texY, 0, texHeight - 1);
+        vec2 texCoord;
         float normalizedX = texX / texWidth;
         float normalizedY = texY / texHeight;
+        texCoord.x = clamp(normalizedX, 0.0, 1.0);
+        texCoord.y = clamp(normalizedY, 0.0, 1.0);
 
-        vec2 texCoord = vec2(normalizedX, normalizedY);
-        vec4 color = vec4(0);
-        // SWITCH STATEMENT
+        vec4 color = texture(textures[int(textureIdx)], texCoord);
 
         imageStore(outImage, ivec2(int(x), int(y)), color);
 
