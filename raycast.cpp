@@ -157,15 +157,15 @@ void cubeToLines(gameState& state){
     }
 }
 
-float xRange, yRange;
-
 // Calculate at what height some players head is at
-SDL_FPoint calculatePlayerHead(const gameState& state, int index, int& fontSize){
-    if (index >= state.numPlayers) return {0, 0};
+bool calculatePlayerHead(const gameState& state, int index, TTF_Font*& font, SDL_FRect& headBox){
+    if (index >= state.numPlayers) return false;
+
+    Player otherPlayer = state.otherPlayers[index];
 
     // Translate sprite position to relative to camera
-    double spriteX = state.sprites[state.numSprites + index].pos.x - state.player.pos.x;
-    double spriteY = state.sprites[state.numSprites + index].pos.y - state.player.pos.y;
+    double spriteX = otherPlayer.pos.x - state.player.pos.x;
+    double spriteY = otherPlayer.pos.y - state.player.pos.y;
 
     double planeX = state.player.camera.x;
     double planeY = state.player.camera.y;
@@ -195,19 +195,31 @@ SDL_FPoint calculatePlayerHead(const gameState& state, int index, int& fontSize)
     int drawEndX = spriteWidth / 2 + spriteScreenX;
     if(drawEndX >= WINDOW_WIDTH) drawEndX = WINDOW_WIDTH - 1;
 
-    // Calculate constants
-    float headTexX = 0.25;
-    float headTexY = 0.05;
-
-    float screenX = headTexX * spriteWidth + spriteScreenX - spriteWidth / 2;
-    float screenY = headTexY * spriteHeight + WINDOW_HEIGHT / 2 - spriteHeight / 2;
+    // If the player is not on the screen, don't render their name
+    if (transformY < 0){
+        return false;
+    }
 
     // Change the font size
     float arbitraryConstant = 100;
     float scaleFactor = 1.0f / transformY;
-    fontSize = int(arbitraryConstant * scaleFactor);
+    int fontSize = std::clamp(int(arbitraryConstant * scaleFactor), 8, 100);
 
-    return {screenX, screenY};
+    font = TTF_OpenFont("TIMES.TTF", fontSize);
+
+    std::pair<float, float> dims = getWidthAndHeight(font, otherPlayer.username);
+    float normalizedStartX = ((spriteWidth - dims.first) / 2) / spriteWidth;
+    float normalizedStartY = 0.05;
+
+    float screenX = normalizedStartX * spriteWidth + spriteScreenX - spriteWidth / 2;
+    float screenY = normalizedStartY * spriteHeight + WINDOW_HEIGHT / 2 - spriteHeight / 2;
+
+    headBox.x = screenX;
+    headBox.y = screenY;
+    headBox.w = dims.first;
+    headBox.h = dims.second;
+
+    return true;
 }
 
 void renderTab(TTF_Font* font, const gameState& state){
@@ -233,14 +245,17 @@ void renderTab(TTF_Font* font, const gameState& state){
 
 void renderPlayerNames(std::string fontName, const gameState& state){
     for (int i = 0; i < state.numPlayers; i++){
-        // Change the font size as the player gets further away
-        int fontSize;
+        TTF_Font* font;
+        SDL_FRect headBox;
         // Render each player's name above their head
-        SDL_FPoint headPoint = calculatePlayerHead(state, i, fontSize);
+        bool isOnScreen = calculatePlayerHead(state, i, font, headBox);
+        if (!isOnScreen) continue;
+
+        // Draw a rectangle
+        GPURenderRect(headBox, {64, 64, 64, 127}, true);
 
         // Create a new sized font
-        TTF_Font* font = TTF_OpenFont(fontName.c_str(), fontSize);
-        GPURenderText(font, state.otherPlayers[i].username, headPoint, {255, 255, 255, 255});
+        GPURenderText(font, state.otherPlayers[i].username, {headBox.x, headBox.y}, {255, 255, 255, 255});
         TTF_CloseFont(font);
     }
 }
@@ -330,7 +345,7 @@ int main(int argc, char* argv[]){
 
     double playerSpeed = 0.005;
     double rotationSpeed = 0.01;
-    double animationSpeed = playerSpeed * 50; // The step size used to get from one frame to the next (1 -> normal)
+    double animationSpeed = 0.05; // The step size used to get from one frame to the next (1 -> normal)
     double animationAccumulate = 0; // Where we accumulate the step sizes that might be fractional
 
     SDL_Event event;
@@ -340,8 +355,6 @@ int main(int argc, char* argv[]){
 
     Clk clock;
     bool run = true;
-
-    xRange = 0; yRange = 0;
 
     while (run){
         clock.begin();
@@ -354,6 +367,9 @@ int main(int argc, char* argv[]){
                     break;
                 }
                 case SDL_EVENT_WINDOW_RESIZED: {
+                    WINDOW_WIDTH = event.window.data1;
+                    WINDOW_HEIGHT = event.window.data2;
+
                     resizeShaders(window);
                     break;
                 }
@@ -368,16 +384,6 @@ int main(int argc, char* argv[]){
                     if (event.button.button == SDL_BUTTON_RIGHT){
                         rightMouseButtonDown = false;
                     }
-                    break;
-                }
-                case SDL_EVENT_KEY_DOWN: {
-                    switch (event.key.key){
-                        case SDLK_LEFT: xRange -= 0.05; break;
-                        case SDLK_RIGHT: xRange += 0.05; break;
-                        case SDLK_UP: yRange += 0.05; break;
-                        case SDLK_DOWN: yRange -= 0.05; break;
-                    }
-                    std::cout << xRange << " " << yRange << std::endl;
                     break;
                 }
                 case SDL_EVENT_MOUSE_WHEEL: {

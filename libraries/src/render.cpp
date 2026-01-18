@@ -106,10 +106,17 @@ void setMapUniforms(GLuint currentShader){
     glUniform1iv(glGetUniformLocation(currentShader, "textures"), mapUnits.size(), mapUnits.data());
 }
 
+void setWallUniforms(){
+    for (int i = 0; i < glWallTextures.size(); i++){
+        std::string lookUp = "tex" + std::to_string(i);
+        glUniform1i(glGetUniformLocation(wallShader, lookUp.c_str()), i);
+    }
+}
+
 // Set the texture uniforms to the right textures for the sprites
-void setSpriteUniforms(GLuint currentShader){
+void setSpriteUniforms(){
     glUniform1i(glGetUniformLocation(spriteShader, "playerTextures"), 0);
-    glUniform1iv(glGetUniformLocation(currentShader, "spriteTextures"), spriteUnits.size(), spriteUnits.data());
+    glUniform1iv(glGetUniformLocation(spriteShader, "spriteTextures"), spriteUnits.size(), spriteUnits.data());
 }
 
 void activateWallTextures(){
@@ -271,25 +278,36 @@ bool createInputTextures(const std::vector<SDL_Surface*>& wallTextures, const st
 
 // GENERATE TEXTURES FOR WALL, FLOOR AND CEILING SHADER
 void generateMapTextures(std::string& wallStr, std::string& floorStr, std::string& ceilingStr, int numTextures){
-    // The length of a tab
     std::string tab = "    ";
+    std::string uniforms;
+    for (int i = 0; i < numTextures; i++){
+        uniforms += "uniform sampler2D tex" + std::to_string(i) + ";\n";
+    }
 
-    // Insert the uniforms into every string first
-    std::string arrSize = std::to_string(numTextures);
-    std::string uniforms = "uniform sampler2D textures[" + arrSize + "];";
-
-    // Search for the identifier "// UNIFORMS""
     std::string uniformID = "// UNIFORMS\n";
-
-    // Find positions
     int wallUniform = wallStr.find(uniformID) + uniformID.length();
-    int floorUniform = floorStr.find(uniformID) + uniformID.length();
-    int ceilingUniform = ceilingStr.find(uniformID) + uniformID.length();
-
-    // Insert into the right place
     wallStr.insert(wallUniform, uniforms);
-    floorStr.insert(floorUniform, uniforms);
-    ceilingStr.insert(ceilingUniform, uniforms);
+
+    std::string switchStatement = tab + tab + "switch(textureIdx){\n" + tab + tab + tab + "case -1: color = vec4(0); break;\n";
+    for (int i = 0; i < numTextures; i++){
+        switchStatement += tab + tab + tab + "case " + std::to_string(i) + ": color = texture(tex" + std::to_string(i) + ", texCoord); break;\n";
+    }
+    switchStatement += tab + tab + "}\n";
+
+    std::string switchID = "// SWITCH STATEMENT\n";
+    int wallSwitch = wallStr.find(switchID) + switchID.length();
+    wallStr.insert(wallSwitch, switchStatement);
+
+    // Insert into the floor and ceiling files now
+    std::string arrSize = std::to_string(numTextures);
+    std::string uniforms2 = "uniform sampler2D textures [" + arrSize + "];";
+
+    std::string uniformID2 = "// UNIFORMS\n";
+    int floorUniform = floorStr.find(uniformID2) + uniformID2.length();
+    int ceilUniform = ceilingStr.find(uniformID2) + uniformID2.length();
+
+    floorStr.insert(floorUniform, uniforms2);
+    ceilingStr.insert(ceilUniform, uniforms2);
 
     {
         std::ofstream file(shaderFolder + "\\wallChanged.glsl");
@@ -313,7 +331,7 @@ void generateMapTextures(std::string& wallStr, std::string& floorStr, std::strin
 
 // GENERATE TEXTURES FOR SPRITE SHADER
 void generateSpriteTextures(std::string& spriteStr, int numTextures){
-        // The length of a tab
+    // The length of a tab
     std::string tab = "    ";
 
     // Insert the uniforms into every string first
@@ -618,7 +636,7 @@ void dispatchShader(shaderType type, const gameState& state){
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, glMapColumnsData);
 
         // Set the texture related uniforms
-        setMapUniforms(wallShader);
+        setWallUniforms();
 
         glUniform1i(glGetUniformLocation(wallShader, "WINDOW_WIDTH"), W);
         glUniform1i(glGetUniformLocation(wallShader, "WINDOW_HEIGHT"), H);
@@ -689,7 +707,7 @@ void dispatchShader(shaderType type, const gameState& state){
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, glSpriteResults); 
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, glSpriteResults);
 
-        setSpriteUniforms(spriteShader);
+        setSpriteUniforms();
 
         glUniform1ui(glGetUniformLocation(spriteShader, "numSprites"), numSprites);
         glUniform2f(glGetUniformLocation(spriteShader, "lookDir"), lookDir.x, lookDir.y);

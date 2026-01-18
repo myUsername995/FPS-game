@@ -50,7 +50,9 @@ void main() {
         float normalizedX = texX / texWidth;
         float normalizedY = texY / texHeight;
 
-        vec4 color = texture(textures[int(textureIdx)], vec2(normalizedX, normalizedY));
+        vec2 texCoord = vec2(normalizedX, normalizedY);
+        vec4 color = vec4(0);
+        // SWITCH STATEMENT
 
         imageStore(outImage, ivec2(int(x), int(y)), color);
 

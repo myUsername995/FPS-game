@@ -15,7 +15,7 @@ layout(std430, binding = 0) buffer columnBuf {
 layout(binding = 0, rgba8) writeonly uniform image2D outImage;  // Output image
 
 // UNIFORMS
-uniform sampler2D textures[9];
+uniform sampler2D textures [9];
 uniform vec2 lookDir;        // Look direction of our player (normalized)
 uniform vec2 camera;         // Camera plane vector
 uniform vec2 playerPos;      // Position of the player

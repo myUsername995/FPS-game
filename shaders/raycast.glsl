@@ -102,7 +102,7 @@ void main() {
     // If no hit, just clear column (e.g., black)
     if (closestLineIndex == -1) {
         columns[x].wallRange = ivec2(0, 0);         // (0, 0) indicates no collision
-        columns[x].texture = 0;
+        columns[x].texture = -1;
         return;
     }
     
