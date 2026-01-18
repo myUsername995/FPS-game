@@ -24,6 +24,7 @@ ON CLIENT INPUT:
 struct Network_player {
     // Metadata
     uint32_t playerID;
+    char username[32];
 
     // Player data
     float posX;

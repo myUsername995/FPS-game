@@ -2,6 +2,8 @@ file(REMOVE_RECURSE
   "C:/Files/Cpp_files/silly/MultiplayerFPS/server.exe"
   "C:/Files/Cpp_files/silly/MultiplayerFPS/server.exe.manifest"
   "C:/Files/Cpp_files/silly/MultiplayerFPS/server.pdb"
+  "CMakeFiles/server.dir/libraries/src/gameState.cpp.obj"
+  "CMakeFiles/server.dir/libraries/src/gameState.cpp.obj.d"
   "CMakeFiles/server.dir/server.cpp.obj"
   "CMakeFiles/server.dir/server.cpp.obj.d"
   "libserver.dll.a"

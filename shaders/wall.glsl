@@ -20,13 +20,11 @@ uniform int WINDOW_WIDTH;
 uniform int WINDOW_HEIGHT;
 uniform float texWidth;
 uniform float texHeight;
-uniform int xRange;
-uniform int yRange;
 
 void main() {
     int x = int(gl_GlobalInvocationID.x);
 
-    if (x >= WINDOW_WIDTH || x >= xRange){
+    if (x >= WINDOW_WIDTH){
         return;
     }
 
@@ -45,9 +43,8 @@ void main() {
 
     // The texture of the current column
     int textureIdx = curColumn.texture;
-    float maxY = clamp(yRange, wall.x, wall.y);
 
-    for (int y = int(wall.x); y < int(maxY); y++){
+    for (int y = int(wall.x); y < int(wall.y); y++){
         texX = clamp(texX, 0, texWidth - 1);
         texY = clamp(texY, 0, texHeight - 1);
         float normalizedX = texX / texWidth;

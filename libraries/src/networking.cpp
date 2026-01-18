@@ -1,11 +1,13 @@
 #include "networking.hpp"
 #include <iostream>
 #include <cassert>
+#include <cstring>
 
 // Used for sending data over the network
 struct Network_player {
     // Metadata
     uint32_t playerID;
+    char username[32];
 
     // Player data
     float posX;
@@ -226,6 +228,7 @@ void Client::receiveData(gameState& state){
                 state.otherPlayers[i].camera = {0, 0}; // Camera doesn't matter for other players
                 state.otherPlayers[i].lookDir = {network_otherPlayers[i].lookDirX, network_otherPlayers[i].lookDirY};
                 state.otherPlayers[i].playerID = network_otherPlayers[i].playerID;
+                state.otherPlayers[i].username = network_otherPlayers[i].username;
                 state.otherPlayers[i].pos.x = network_otherPlayers[i].posX;
                 state.otherPlayers[i].pos.y = network_otherPlayers[i].posY;
                 state.otherPlayers[i].isMoving = network_otherPlayers[i].isMoving == 1 ? true : false;
@@ -255,6 +258,8 @@ void Client::sendData(gameState& state){
     p.lookDirX = state.player.lookDir.x;
     p.lookDirY = state.player.lookDir.y;
     p.playerID = state.player.playerID;
+    std::strncpy(p.username, state.player.username.c_str(), sizeof(p.username) - 1);
+    p.username[sizeof(p.username) - 1] = '\0';
     p.posX = state.player.pos.x;
     p.posY = state.player.pos.y;
     p.isMoving = state.player.isMoving;

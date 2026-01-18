@@ -388,8 +388,6 @@ void fillSpriteArrays(const gameState& state){
             spritesData[i].width = 64;
             spritesData[i].height = 64;
             spritesData[i].isPlayer = 1;
-
-            std::cout << spritesData[i].texture << std::endl;
         }
         // Sprite specific data
         else {
@@ -626,8 +624,6 @@ void dispatchShader(shaderType type, const gameState& state){
         glUniform1i(glGetUniformLocation(wallShader, "WINDOW_HEIGHT"), H);
         glUniform1f(glGetUniformLocation(wallShader, "texWidth"), 64);
         glUniform1f(glGetUniformLocation(wallShader, "texHeight"), 64);
-        glUniform1i(glGetUniformLocation(wallShader, "xRange"), int(state.xRange));
-        glUniform1i(glGetUniformLocation(wallShader, "yRange"), int(state.yRange));
 
         int renderX = (W + 255) / 256;
         glDispatchCompute(renderX, 1, 1);

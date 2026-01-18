@@ -2,12 +2,11 @@
 INTRODUCTION: A raycaster that renders on the GPU, allows multiplayer and other stuff.
 
 Dependencies:
--SDL3, SDL3_image, SDL3_ttf
--ENet
+-SDL3, SDL3_image, SDL3_ttf     -> libSDL3.dll.a, etc..., DLLs required at runtime
+-ENet                           -> libenet.a
 -C++ standard library
--GPU.hpp (my own silly library)
--glad
-
+-GPU.hpp (my own silly library) -> libmyLibrary.a
+-glad                           -> libglad.a
 */
 
 
@@ -33,9 +32,6 @@ Dependencies:
 int WINDOW_HEIGHT = 800;
 int WINDOW_WIDTH = 800;
 
-float PI = 3.14159;
-std::string serverIP = "127.0.0.1";
-
 // Textures of the sprites and walls
 std::vector<Texture> wallTextures;
 std::vector<Texture> spriteTextures;
@@ -49,6 +45,12 @@ enum textureType {
     TEXTURE_PLAYER,
     TEXTURE_SKY
 };
+
+std::pair<float, float> getWidthAndHeight(TTF_Font* font, const std::string& str){
+    SDL_Surface* surface = TTF_RenderText_Solid(font, str.c_str(), str.length(), {0, 0, 0, 0});
+
+    return {(float)surface->w, (float)surface->h};
+}
 
 // Helper function to parse the player.png picture into the playerTextures array
 void parsePlayerTextures(const std::string& path){
@@ -155,18 +157,92 @@ void cubeToLines(gameState& state){
     }
 }
 
-void renderText(SDL_Renderer* renderer, TTF_Font* font, SDL_FRect& pos, const std::string& str, const SDL_Color& color){
-    SDL_Surface* surface = TTF_RenderText_Blended(font, str.c_str(), str.size(), color);
+float xRange, yRange;
 
-    pos.w = surface->w;
-    pos.h = surface->h;
+// Calculate at what height some players head is at
+SDL_FPoint calculatePlayerHead(const gameState& state, int index, int& fontSize){
+    if (index >= state.numPlayers) return {0, 0};
 
-    SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, surface);
+    // Translate sprite position to relative to camera
+    double spriteX = state.sprites[state.numSprites + index].pos.x - state.player.pos.x;
+    double spriteY = state.sprites[state.numSprites + index].pos.y - state.player.pos.y;
 
-    SDL_RenderTexture(renderer, tex, NULL, &pos);
+    double planeX = state.player.camera.x;
+    double planeY = state.player.camera.y;
+    double dirX = state.player.lookDir.x;
+    double dirY = state.player.lookDir.y;
 
-    SDL_DestroySurface(surface);
-    SDL_DestroyTexture(tex);
+    double invDet = 1.0 / (planeX * dirY - dirX * planeY);
+
+    double transformX = invDet * (dirY * spriteX - dirX * spriteY);
+    // This is actually the depth inside the screen, that what Z is in 3D
+    double transformY = invDet * (-planeY * spriteX + planeX * spriteY);
+
+    int spriteScreenX = int((WINDOW_WIDTH / 2) * (1 + transformX / transformY));
+
+    //calculate height of the sprite on screen
+    int spriteHeight = abs(int(WINDOW_HEIGHT / (transformY))); //using 'transformY' instead of the real distance prevents fisheye
+    //calculate lowest and highest pixel to fill in current stripe
+    int drawStartY = -spriteHeight / 2 + WINDOW_HEIGHT / 2;
+    if(drawStartY < 0) drawStartY = 0;
+    int drawEndY = spriteHeight / 2 + WINDOW_HEIGHT / 2;
+    if(drawEndY >= WINDOW_HEIGHT) drawEndY = WINDOW_HEIGHT - 1;
+
+    //calculate width of the sprite
+    int spriteWidth = abs( int (WINDOW_HEIGHT / (transformY)));
+    int drawStartX = -spriteWidth / 2 + spriteScreenX;
+    if(drawStartX < 0) drawStartX = 0;
+    int drawEndX = spriteWidth / 2 + spriteScreenX;
+    if(drawEndX >= WINDOW_WIDTH) drawEndX = WINDOW_WIDTH - 1;
+
+    // Calculate constants
+    float headTexX = 0.25;
+    float headTexY = 0.05;
+
+    float screenX = headTexX * spriteWidth + spriteScreenX - spriteWidth / 2;
+    float screenY = headTexY * spriteHeight + WINDOW_HEIGHT / 2 - spriteHeight / 2;
+
+    // Change the font size
+    float arbitraryConstant = 100;
+    float scaleFactor = 1.0f / transformY;
+    fontSize = int(arbitraryConstant * scaleFactor);
+
+    return {screenX, screenY};
+}
+
+void renderTab(TTF_Font* font, const gameState& state){
+    // Get the height of the first username (all other usernames should be the same height)
+    std::pair<float, float> userHeights = getWidthAndHeight(font, state.player.username);
+    float height = userHeights.second;
+
+    // Render the background rectangle first
+    float rectWidth = 200;
+    SDL_FRect rect;
+    rect.x = WINDOW_WIDTH / 2 - rectWidth / 2; rect.y = 0; rect.w = rectWidth; rect.h = (height + 10) * (state.numPlayers + 1);
+    GPURenderRect(rect, {64, 64, 64, 127}, true);
+
+    // Render our name at the top
+    SDL_FPoint midStart = {WINDOW_WIDTH / 2 - rectWidth / 2 + 10, 0};
+    GPURenderText(font, state.player.username, midStart, {255, 255, 255, 255});
+    for (int i = 0; i < state.numPlayers; i++){
+        // Render each player's name on the tab
+        midStart.y += height + 10;
+        GPURenderText(font, state.otherPlayers[i].username, midStart, {255, 255, 255, 255});
+    }
+}
+
+void renderPlayerNames(std::string fontName, const gameState& state){
+    for (int i = 0; i < state.numPlayers; i++){
+        // Change the font size as the player gets further away
+        int fontSize;
+        // Render each player's name above their head
+        SDL_FPoint headPoint = calculatePlayerHead(state, i, fontSize);
+
+        // Create a new sized font
+        TTF_Font* font = TTF_OpenFont(fontName.c_str(), fontSize);
+        GPURenderText(font, state.otherPlayers[i].username, headPoint, {255, 255, 255, 255});
+        TTF_CloseFont(font);
+    }
 }
 
 int main(int argc, char* argv[]){
@@ -246,6 +322,7 @@ int main(int argc, char* argv[]){
     if (initShaders(window, state) == -1) return 0;
 
     TTF_Font* font = TTF_OpenFont("Roboto_Condensed-Black.ttf", 20);
+    TTF_Font* font2 = TTF_OpenFont("TIMES.TTF", 15);
 
     double FPSCap = 1000;
     double FPS = 0;
@@ -264,7 +341,7 @@ int main(int argc, char* argv[]){
     Clk clock;
     bool run = true;
 
-    double stepRange = 10;
+    xRange = 0; yRange = 0;
 
     while (run){
         clock.begin();
@@ -277,29 +354,7 @@ int main(int argc, char* argv[]){
                     break;
                 }
                 case SDL_EVENT_WINDOW_RESIZED: {
-                    WINDOW_WIDTH = event.window.data1;
-                    WINDOW_HEIGHT = event.window.data2;
-
                     resizeShaders(window);
-                    break;
-                }
-                case SDL_EVENT_KEY_DOWN: {
-                    std::cout << state.xRange << " " << state.yRange << std::endl;
-                    if (event.key.key == SDLK_RIGHT){
-                        // If Y is about to wrap around, step X to the next wall
-                        if ((state.yRange + stepRange) >= WINDOW_HEIGHT){
-                            state.xRange = fmod(state.xRange + stepRange, WINDOW_WIDTH);
-                        }
-                        state.yRange = fmod(state.yRange + stepRange, WINDOW_HEIGHT);
-                    }
-                    if (event.key.key == SDLK_LEFT){
-                        if ((state.yRange - stepRange) <= 0){
-                            state.xRange -= stepRange;
-                            if (state.xRange <= 0) state.xRange = WINDOW_WIDTH;
-                        }
-                        state.yRange -= stepRange;
-                        if (state.yRange <= 0) state.yRange = WINDOW_HEIGHT;
-                    }
                     break;
                 }
                 case SDL_EVENT_MOUSE_BUTTON_DOWN: {
@@ -315,8 +370,17 @@ int main(int argc, char* argv[]){
                     }
                     break;
                 }
+                case SDL_EVENT_KEY_DOWN: {
+                    switch (event.key.key){
+                        case SDLK_LEFT: xRange -= 0.05; break;
+                        case SDLK_RIGHT: xRange += 0.05; break;
+                        case SDLK_UP: yRange += 0.05; break;
+                        case SDLK_DOWN: yRange -= 0.05; break;
+                    }
+                    std::cout << xRange << " " << yRange << std::endl;
+                    break;
+                }
                 case SDL_EVENT_MOUSE_WHEEL: {
-                    stepRange += event.wheel.y;
                     playerSpeed += event.wheel.y * playerSpeed / 20;
 
                     // Make the animation faster as the player gets faster
@@ -416,13 +480,19 @@ int main(int argc, char* argv[]){
 
         renderMap(window, state);
 
+        // Render player's names above their heads
+        renderPlayerNames("TIMES.TTF", state);
+
+        // Tab pressed
+        if (keyboardState[SDL_SCANCODE_TAB]){
+            // Render player's names on the tab
+            renderTab(font2, state);
+        }
+
         SDL_FRect rect = GPURenderText(font, "FPS: " + std::to_string(FPS), {10, 10}, {255, 255, 255, 255});
 
         rect.y += rect.h + 10;
         rect = GPURenderText(font, "Speed: " + std::to_string(playerSpeed), {rect.x, rect.y}, {255, 255, 255, 255});
-
-        rect.y += rect.h + 10;
-        rect = GPURenderText(font, "Username: " + state.player.username, {rect.x, rect.y}, {255, 255, 255, 255});
 
         rect.y += rect.h + 10;
         rect = GPURenderText(font, "Ping (ms): " + std::to_string(ping.getTime()), {rect.x, rect.y}, {255, 255, 255, 255});

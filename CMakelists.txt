@@ -55,7 +55,7 @@ set_target_properties(enet64 PROPERTIES
 )
 
 # -------------------------
-# Your precompiled library
+# My precompiled library
 # -------------------------
 add_library(myLibrary STATIC IMPORTED)
 set_target_properties(myLibrary PROPERTIES
@@ -68,7 +68,6 @@ set_target_properties(myLibrary PROPERTIES
 # =========================
 set(COMMON_INCLUDES
     "./libraries/header"
-    "${LIB_DIR}"
 )
 
 set(COMMON_LIBS
@@ -97,6 +96,10 @@ set(RENDERING_SRC
     "./libraries/src/render.cpp"
 )
 
+set(STATE_SRC
+    "./libraries/src/gameState.cpp"
+)
+
 # =========================
 # Targets
 # =========================
@@ -107,11 +110,11 @@ target_include_directories(editor PRIVATE ${COMMON_INCLUDES})
 target_link_libraries(editor PRIVATE ${COMMON_LIBS})
 
 # -------- raycast --------
-add_executable(raycast raycast.cpp ${NETWORKING_SRC} ${RENDERING_SRC})
+add_executable(raycast raycast.cpp ${NETWORKING_SRC} ${RENDERING_SRC} ${STATE_SRC})
 target_include_directories(raycast PRIVATE ${COMMON_INCLUDES})
 target_link_libraries(raycast PRIVATE ${COMMON_LIBS} ${ENET_LIBS})
 
 # -------- server --------
-add_executable(server server.cpp)
+add_executable(server server.cpp ${STATE_SRC})
 target_include_directories(server PRIVATE ${COMMON_INCLUDES})
 target_link_libraries(server PRIVATE ${COMMON_LIBS} ${ENET_LIBS})

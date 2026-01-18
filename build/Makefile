@@ -178,6 +178,33 @@ editor.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\editor.dir\build.make CMakeFiles/editor.dir/editor.cpp.s
 .PHONY : editor.cpp.s
 
+libraries/src/gameState.obj: libraries/src/gameState.cpp.obj
+.PHONY : libraries/src/gameState.obj
+
+# target to build an object file
+libraries/src/gameState.cpp.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\raycast.dir\build.make CMakeFiles/raycast.dir/libraries/src/gameState.cpp.obj
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\server.dir\build.make CMakeFiles/server.dir/libraries/src/gameState.cpp.obj
+.PHONY : libraries/src/gameState.cpp.obj
+
+libraries/src/gameState.i: libraries/src/gameState.cpp.i
+.PHONY : libraries/src/gameState.i
+
+# target to preprocess a source file
+libraries/src/gameState.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\raycast.dir\build.make CMakeFiles/raycast.dir/libraries/src/gameState.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\server.dir\build.make CMakeFiles/server.dir/libraries/src/gameState.cpp.i
+.PHONY : libraries/src/gameState.cpp.i
+
+libraries/src/gameState.s: libraries/src/gameState.cpp.s
+.PHONY : libraries/src/gameState.s
+
+# target to generate assembly for a file
+libraries/src/gameState.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\raycast.dir\build.make CMakeFiles/raycast.dir/libraries/src/gameState.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\server.dir\build.make CMakeFiles/server.dir/libraries/src/gameState.cpp.s
+.PHONY : libraries/src/gameState.cpp.s
+
 libraries/src/networking.obj: libraries/src/networking.cpp.obj
 .PHONY : libraries/src/networking.obj
 
@@ -288,6 +315,9 @@ help:
 	@echo ... editor.obj
 	@echo ... editor.i
 	@echo ... editor.s
+	@echo ... libraries/src/gameState.obj
+	@echo ... libraries/src/gameState.i
+	@echo ... libraries/src/gameState.s
 	@echo ... libraries/src/networking.obj
 	@echo ... libraries/src/networking.i
 	@echo ... libraries/src/networking.s

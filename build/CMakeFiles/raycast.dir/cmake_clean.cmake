@@ -2,6 +2,8 @@ file(REMOVE_RECURSE
   "C:/Files/Cpp_files/silly/MultiplayerFPS/raycast.exe"
   "C:/Files/Cpp_files/silly/MultiplayerFPS/raycast.exe.manifest"
   "C:/Files/Cpp_files/silly/MultiplayerFPS/raycast.pdb"
+  "CMakeFiles/raycast.dir/libraries/src/gameState.cpp.obj"
+  "CMakeFiles/raycast.dir/libraries/src/gameState.cpp.obj.d"
   "CMakeFiles/raycast.dir/libraries/src/networking.cpp.obj"
   "CMakeFiles/raycast.dir/libraries/src/networking.cpp.obj.d"
   "CMakeFiles/raycast.dir/libraries/src/render.cpp.obj"
