@@ -19,4 +19,7 @@ void main() {
     if (!isFiltered){
         FragColor = col;
     }
+    else {
+        FragColor = vec4(0);
+    }
 }
