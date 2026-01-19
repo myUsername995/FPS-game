@@ -20,6 +20,8 @@ ON CLIENT INPUT:
 #include <cstdint>
 #include <fstream>
 
+int maxUsername = 16;
+
 // Used for sending data over the network
 struct Network_player {
     // Metadata
@@ -174,9 +176,17 @@ int main(int argc, char* argv[]){
                     // Give him an username
                     std::string username = getRandomName(randNames, numNames);
 
+                    if (username.size() > maxUsername){
+                        std::cout << username << ": Username can't be longer than " << maxUsername <<  " characters.\n";
+                        enet_peer_reset(event.peer); break;
+                    }
+
                     // Give him an ID
                     uint32_t playerID = findAvailableID(availableIDs);
-                    if (playerID == -1) { enet_peer_reset(event.peer); break; }
+                    if (playerID == -1){
+                        std::cout << "Too many players, can't assign ID to " << username << ".\n";
+                        enet_peer_reset(event.peer); break;
+                    }
                     availableIDs[playerID] = false;
 
                     // Add him to our players array

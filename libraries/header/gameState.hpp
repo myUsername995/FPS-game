@@ -122,4 +122,5 @@ struct gameState {
     // The textures of sprites
     std::vector<Texture> wallTextures;
     std::vector<Texture> spriteTextures;        // Sprite textures include players too
+    std::vector<Texture> screenTextures;
 };

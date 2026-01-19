@@ -110,8 +110,8 @@ void main() {
 
                 // Load the color from the image based on the previously set attributes
                 vec2 texCoord;
-                texCoord.x = 1.0 - float(texX) / float(spriteTexWidth);
-                texCoord.y = 1.0 - float(texY) / float(spriteTexHeight);
+                texCoord.x = float(texX) / float(spriteTexWidth);
+                texCoord.y = float(texY) / float(spriteTexHeight);
 
                 vec4 color;
                 if (sprite.isPlayer == 0){

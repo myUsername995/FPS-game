@@ -37,12 +37,12 @@ std::vector<Texture> wallTextures;
 std::vector<Texture> spriteTextures;
 std::array<Texture, 8> playerTextures;
 std::array<std::array<Texture, 8>, 4> playerRunTextures;
+std::vector<Texture> screenTextures;
 Texture skyTexture;
 
 enum textureType {
     TEXTURE_WALL,
     TEXTURE_SPRITE,
-    TEXTURE_PLAYER,
     TEXTURE_SKY
 };
 
@@ -50,6 +50,39 @@ std::pair<float, float> getWidthAndHeight(TTF_Font* font, const std::string& str
     SDL_Surface* surface = TTF_RenderText_Solid(font, str.c_str(), str.length(), {0, 0, 0, 0});
 
     return {(float)surface->w, (float)surface->h};
+}
+
+// OpenGL wants me to flip the surface cuz it renders upside down and stuff
+SDL_Surface* flipSurfaceVertical(SDL_Surface* src) {
+    if (!src) return nullptr;
+
+    // Create a new surface with the same format and size
+    SDL_Surface* flipped = SDL_CreateSurface(src->w, src->h, src->format);
+    if (!flipped) {
+        std::cerr << "Failed to create surface: " << SDL_GetError() << "\n";
+        return nullptr;
+    }
+
+    SDL_LockSurface(src);
+    SDL_LockSurface(flipped);
+
+    int pitch = src->pitch; // bytes per row
+    uint8_t* srcPixels = (uint8_t*)src->pixels;
+    uint8_t* dstPixels = (uint8_t*)flipped->pixels;
+
+    // Copy rows from bottom to top
+    for (int y = 0; y < src->h; ++y) {
+        memcpy(
+            dstPixels + y * pitch,                // destination row
+            srcPixels + (src->h - 1 - y) * pitch, // source row from bottom
+            pitch
+        );
+    }
+
+    SDL_UnlockSurface(src);
+    SDL_UnlockSurface(flipped);
+
+    return flipped;
 }
 
 // Helper function to parse the player.png picture into the playerTextures array
@@ -77,6 +110,8 @@ void parsePlayerTextures(const std::string& path){
                 // Where to copy it from, from the image of images
                 SDL_Rect srcRect = {x, y, 64, 64};
                 SDL_BlitSurface(surface, &srcRect, playerTextures[i].texture, NULL);
+
+                playerTextures[i].texture = flipSurfaceVertical(playerTextures[i].texture);
             }
             else {
                 playerRunTextures[j-1][i].texture = SDL_CreateSurface(64, 64, SDL_PIXELFORMAT_RGBA8888);
@@ -87,7 +122,38 @@ void parsePlayerTextures(const std::string& path){
                 // Where to copy it from, from the image of images
                 SDL_Rect srcRect = {x, y, 64, 64};
                 SDL_BlitSurface(surface, &srcRect, playerRunTextures[j-1][i].texture, NULL);
+
+                playerRunTextures[j-1][i].texture = flipSurfaceVertical(playerRunTextures[j-1][i].texture);
             }
+        }
+    }
+}
+
+void parseScreenTextures(const std::string& path){
+    screenTextures.resize(15);
+
+    SDL_Surface* surface = IMG_Load(path.c_str());
+    if (!surface) {
+        SDL_Log("IMG_Load failed: %s", SDL_GetError());
+        return;
+    }
+
+    // Every picture is 64 by 64 pixels, we have 3 rows and 5 columns. There is also a 1 pixel gap between each texture.
+    for (int i = 0; i < 3; i++){
+        for (int j = 0; j < 5; j++){
+            screenTextures[i*5+j].texture = SDL_CreateSurface(64, 64, SDL_PIXELFORMAT_RGBA32);
+            screenTextures[i*5+j].width = 64;
+            screenTextures[i*5+j].height = 64;
+
+            SDL_Rect srcRect;
+            srcRect.x = 1 + j * 65;
+            srcRect.y = 1 + i * 65;
+            srcRect.w = 64;
+            srcRect.h = 64;
+
+            SDL_BlitSurface(surface, &srcRect, screenTextures[i*5+j].texture, NULL);
+
+            screenTextures[i*5+j].texture = flipSurfaceVertical(screenTextures[i*5+j].texture);
         }
     }
 }
@@ -116,9 +182,8 @@ bool loadImage(textureType type, const std::string& path, int id = 0) {
             spriteTextures.resize(id+1);
         }
         spriteTextures[id] = tex;
-    }
-    else if (type == TEXTURE_PLAYER){
-        parsePlayerTextures(path);
+
+        spriteTextures[id].texture = flipSurfaceVertical(spriteTextures[id].texture);
     }
     else if (type == TEXTURE_SKY){
         skyTexture = tex;
@@ -226,38 +291,62 @@ void renderTab(TTF_Font* font, const gameState& state){
     // Get the height of the first username (all other usernames should be the same height)
     std::pair<float, float> userHeights = getWidthAndHeight(font, state.player.username);
 
-    float gap = 10; // The gap between names
+    float verticalGap = 10; // The gap between entries
+    float rectWidth = 400; // width of the tab
+    float gap1 = 150; // gap between username and ping
+    float gap2 = 100; // gap between the ping and kills
+
     float height = userHeights.second; // Height of each username
-    float rectWidth = 200; // width of the tab
     SDL_Color tabColor = {64, 64, 64, 127};
+    int numEntries = state.numPlayers + 1;
 
     // Render the background rectangle first
-    SDL_FRect rect;
-    rect.x = WINDOW_WIDTH / 2 - rectWidth / 2; rect.y = 0; rect.w = rectWidth; rect.h = (height + 10) * (state.numPlayers + 1);
-    GPURenderRect(rect, tabColor, true);
+    SDL_FRect backgroundRect;
+    backgroundRect.x = WINDOW_WIDTH / 2 - rectWidth / 2;
+    backgroundRect.y = 0;
+    backgroundRect.w = rectWidth;
+    backgroundRect.h = (height + verticalGap) * (numEntries + 1);
+    GPURenderRect(backgroundRect, {64, 64, 64, 127}, true);
+
+    // Render the header of the tab
+    SDL_FRect headerRect;
+    headerRect.x = WINDOW_WIDTH / 2 - rectWidth / 2; 
+    headerRect.y = 0; 
+    headerRect.w = rectWidth; 
+    headerRect.h = (height + verticalGap);
 
     SDL_FPoint rectStart = {WINDOW_WIDTH / 2 - rectWidth / 2, 0};
-    SDL_FPoint textStart = {rectStart.x + 10, rectStart.y};
+    SDL_FPoint textStart = {headerRect.x + 10, headerRect.y};
 
-    std::vector<Player> allPlayers(state.numPlayers + 1);
+    auto renderTabEntry = [&textStart, gap1, gap2, font, verticalGap, height, rectWidth](std::string name, std::string ping, std::string kills){
+        float curY = textStart.y;
+        float centeredY = curY + verticalGap / 2;
+        SDL_FPoint userText = {textStart.x, centeredY};
+        SDL_FPoint pingText = {textStart.x + gap1, centeredY};
+        SDL_FPoint killText = {pingText.x + gap2, centeredY};
+        GPURenderRect({userText.x-10, curY, gap1, height+verticalGap}, {255, 255, 255, 255}, false);
+        GPURenderText(font, name, textStart, {255, 255, 255, 255});
+
+        GPURenderRect({pingText.x-10, curY, gap2, height+verticalGap}, {255, 255, 255, 255}, false);
+        GPURenderText(font, ping, pingText, {255, 255, 255, 255});
+
+        GPURenderRect({killText.x-10, curY, rectWidth - gap2 - gap1, height+verticalGap}, {255, 255, 255, 255}, false);
+        GPURenderText(font, kills, killText, {255, 255, 255, 255});
+    };
+
+    // Header descriptions
+    renderTabEntry("Username", "Ping", "Kills");
+
+    // Initialise the players array
+    std::vector<Player> allPlayers(numEntries);
     allPlayers[0] = state.player;
     for (int i = 0; i < state.numPlayers; i++) allPlayers[i+1] = state.otherPlayers[i];
 
-    for (int i = 0; i < state.numPlayers + 1; i++){
-        float nameWidth = getWidthAndHeight(font, allPlayers[i].username).first;
+    for (int i = 0; i < numEntries; i++){
+        rectStart.y += height + verticalGap;
+        textStart.y += height + verticalGap;
 
-        // Render each player's name on the tab
-        SDL_FPoint centeredText = {textStart.x, textStart.y + gap / 2};
-        SDL_FPoint pingText = {centeredText.x + nameWidth + 30, centeredText.y};
-
-        GPURenderRect({rectStart.x, rectStart.y, rectWidth, height+10}, {255, 255, 255, 255}, false);
-
-        // Center the text
-        GPURenderText(font, allPlayers[i].username, centeredText, {255, 255, 255, 255});
-        GPURenderText(font, std::to_string(int(allPlayers[i].ping)), pingText, {255, 255, 255, 255});
-
-        rectStart.y += height + gap;
-        textStart.y += height + gap;
+        renderTabEntry(allPlayers[i].username, std::to_string(allPlayers[i].ping), std::to_string(0));
     }
 }
 
@@ -325,8 +414,10 @@ int main(int argc, char* argv[]){
     // Sky
     loadImage(TEXTURE_SKY, "pics/doomSky.png");
 
-    // Player
-    loadImage(TEXTURE_PLAYER, "pics/player.png");
+    // These textures never change, but parsing them everytime we initialise is easier, and probably not that much slower than just 
+    // storing the raw binary data in a file
+    parsePlayerTextures("pics/player.png");
+    parseScreenTextures("pics/guns.png");
 
     // Convert the 3 different sprite texture arrays into one flattened one (0 - 32 -> player run textures, 32 - 40 -> player textures, 
     // 40 - x -> sprite textures)
@@ -352,6 +443,7 @@ int main(int argc, char* argv[]){
 
     state.wallTextures = wallTextures;
     state.spriteTextures = allSpriteTextures;
+    state.screenTextures = screenTextures;
     if (initShaders(window, state) == -1) return 0;
 
     TTF_Font* font = TTF_OpenFont("Roboto_Condensed-Black.ttf", 20);

@@ -6,7 +6,9 @@
 #include <fstream>
 #include "time.hpp"
 
-std::string shaderFolder = "shaders";
+std::string computeFolder = "shaders\\compute";
+std::string vertexFolder = "shaders\\vertex";
+std::string fragmentFolder = "shaders\\fragment";
 
 // Sprite struct
 struct spriteData {
@@ -86,8 +88,9 @@ static std::vector<GLint> spriteUnits;
 static int numSprites;
 
 // Textures
-static std::vector<GLuint> glWallTextures;         // Stores the ID of each wall texture
+static std::vector<GLuint> glWallTextures;     // Stores the ID of each wall texture
 static std::vector<GLuint> glSpriteTextures;   // Stores the ID of each sprite texture (players too)
+static std::vector<GLuint> glScreenTextures;
 static GLuint playerTextureID;
 
 // Globals for VAO/VBO/EBO
@@ -174,11 +177,10 @@ void initQuad() {
     glBindVertexArray(0);
 }
 
-void drawTexture(GLuint screenShader, GLuint tex, float r = 1.0f, float g = 1.0f, float b = 1.0f, float a = 1.0f) {
+void drawTexture(GLuint screenShader, GLuint tex, float r = -1, float g = -1, float b = -1){
     glUseProgram(screenShader);
 
-    // set uniform color
-    glUniform4f(glGetUniformLocation(screenShader, "u_color"), r, g, b, a);
+    glUniform3f(glGetUniformLocation(screenShader, "filterColor"), r, g, b);
 
     // bind texture
     glActiveTexture(GL_TEXTURE0);
@@ -213,7 +215,32 @@ bool createOutputTextures(){
 }
 
 // Only do this once at initalisation
-bool createInputTextures(const std::vector<SDL_Surface*>& wallTextures, const std::vector<SDL_Surface*>& spriteTextures){
+bool createInputTextures(const gameState& state, int numWallTexs, int numSpriteTexs, int numScreenTexs){
+    // Store the constant arrays into global variables
+    glWallTextures.resize(numWallTexs);
+    mapUnits.resize(numWallTexs);
+
+    glSpriteTextures.resize(numSpriteTexs - 40); // Don't include players
+    spriteUnits.resize(numSpriteTexs - 40);
+
+    glScreenTextures.resize(numScreenTexs);
+
+    // Convert the surfaces to the right format that I input to openGL
+    std::vector<SDL_Surface*> wallTextures(numWallTexs);
+    for (int i = 0; i < numWallTexs; i++){
+        wallTextures[i] = SDL_ConvertSurface(state.wallTextures[i].texture, SDL_PIXELFORMAT_RGBA32);
+    }
+
+    std::vector<SDL_Surface*> spriteTextures(numSpriteTexs);
+    for (int i = 0; i < numSpriteTexs; i++){
+        spriteTextures[i] = SDL_ConvertSurface(state.spriteTextures[i].texture, SDL_PIXELFORMAT_RGBA32);
+    }
+
+    std::vector<SDL_Surface*> screenTextures(numScreenTexs);
+    for (int i = 0; i < numScreenTexs; i++){
+        screenTextures[i] = SDL_ConvertSurface(state.screenTextures[i].texture, SDL_PIXELFORMAT_RGBA32);
+    }
+
     // Wall textures
     for (int i = 0; i < wallTextures.size(); i++){
         if (glWallTextures[i] != 0) glDeleteTextures(1, &glWallTextures[i]);
@@ -266,6 +293,23 @@ bool createInputTextures(const std::vector<SDL_Surface*>& wallTextures, const st
         spriteUnits[i] = i+1;
     }
 
+    // Create the screen textures
+    for (int i = 0; i < screenTextures.size(); i++){
+        if (glScreenTextures[i] != 0) glDeleteTextures(1, &glScreenTextures[i]);
+
+        glGenTextures(1, &glScreenTextures[i]);
+        glBindTexture(GL_TEXTURE_2D, glScreenTextures[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, screenTextures[i]->w, screenTextures[i]->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, 
+                     screenTextures[i]->pixels);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+        if (glScreenTextures[i] == 0){
+            std::cout << "Failed to load input textures.\n";
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -292,19 +336,19 @@ void generateMapTextures(std::string& wallStr, std::string& floorStr, std::strin
     ceilingStr.insert(ceilingUniform, uniforms);
 
     {
-        std::ofstream file(shaderFolder + "\\wallChanged.glsl");
+        std::ofstream file(computeFolder + "\\wallChanged.glsl");
         file.write(wallStr.c_str(), wallStr.size());
 
         file.close();
     }
     {
-        std::ofstream file(shaderFolder + "\\floorChanged.glsl");
+        std::ofstream file(computeFolder + "\\floorChanged.glsl");
         file.write(floorStr.c_str(), floorStr.size());
 
         file.close();
     }
     {
-        std::ofstream file(shaderFolder + "\\ceilingChanged.glsl");
+        std::ofstream file(computeFolder + "\\ceilingChanged.glsl");
         file.write(ceilingStr.c_str(), ceilingStr.size());
 
         file.close();
@@ -329,7 +373,7 @@ void generateSpriteTextures(std::string& spriteStr, int numTextures){
     // Insert into the right place
     spriteStr.insert(spriteUniform, uniforms);
 
-    std::ofstream file(shaderFolder + "\\spritesChanged.glsl");
+    std::ofstream file(computeFolder + "\\spritesChanged.glsl");
     file.write(spriteStr.c_str(), spriteStr.size());
 
     file.close();
@@ -424,20 +468,14 @@ int initShaders(SDL_Window* window, const gameState& state){
     getWindowSize(window);
     int numWallTexs = state.wallTextures.size();
     int numSpriteTexs = state.spriteTextures.size();
+    int numScreenTexs = state.screenTextures.size();
     numLines = state.lineMap.size();
     numSprites = state.fullNumSprites;
 
-    // Story the constant arrays into global variables
-    glWallTextures.resize(numWallTexs);
-    mapUnits.resize(numWallTexs);
-
-    glSpriteTextures.resize(numSpriteTexs - 40); // Don't include players
-    spriteUnits.resize(numSpriteTexs - 40);
-
-    std::string wallStr = LoadFile(shaderFolder + "\\wall.glsl");
-    std::string floorStr = LoadFile(shaderFolder + "\\floor.glsl");
-    std::string ceilingStr = LoadFile(shaderFolder + "\\ceiling.glsl");
-    std::string spriteStr = LoadFile(shaderFolder + "\\sprites.glsl");
+    std::string wallStr = LoadFile(computeFolder + "\\wall.glsl");
+    std::string floorStr = LoadFile(computeFolder + "\\floor.glsl");
+    std::string ceilingStr = LoadFile(computeFolder + "\\ceiling.glsl");
+    std::string spriteStr = LoadFile(computeFolder + "\\sprites.glsl");
 
     // Changes the source code of the .glsl files, so that multiple textures can be rendered
     generateMapTextures(wallStr, floorStr, ceilingStr, numWallTexs);
@@ -449,12 +487,12 @@ int initShaders(SDL_Window* window, const gameState& state){
     // Initialise buffers used for transfering data between the shaders
     initBuffers();
 
-    GLuint computeProgram = CompileShader(LoadFile(shaderFolder + "\\raycast.glsl"), GL_COMPUTE_SHADER);
+    GLuint computeProgram = CompileShader(LoadFile(computeFolder + "\\raycast.glsl"), GL_COMPUTE_SHADER);
     GLuint wallProgram = CompileShader(wallStr, GL_COMPUTE_SHADER);
     GLuint floorProgram = CompileShader(floorStr, GL_COMPUTE_SHADER);
     GLuint ceilingProgram = CompileShader(ceilingStr, GL_COMPUTE_SHADER);
     GLuint spriteProgram = CompileShader(spriteStr, GL_COMPUTE_SHADER);
-    GLuint spriteComputeProgram = CompileShader(LoadFile(shaderFolder + "\\spriteCompute.glsl"), GL_COMPUTE_SHADER);
+    GLuint spriteComputeProgram = CompileShader(LoadFile(computeFolder + "\\spriteCompute.glsl"), GL_COMPUTE_SHADER);
 
     if (computeProgram == 0 || wallProgram == 0 || floorProgram == 0 || ceilingProgram == 0 || spriteProgram == 0 || spriteComputeProgram == 0){
         return -1;
@@ -472,30 +510,8 @@ int initShaders(SDL_Window* window, const gameState& state){
     }
 
     // Render textures on the screen
-    const char* screen_frag = 
-    "#version 430 core\n"
-    "\n"
-    "in vec2 v_uv;\n"
-    "out vec4 FragColor;\n"
-    "uniform sampler2D u_tex;\n"
-    "\n"
-    "void main() {\n"
-    "    FragColor = texture(u_tex, v_uv);\n"
-    "}\n";
-
-    const char* screen_vert = 
-    "#version 430 core\n"
-    "\n"
-    "layout(location = 0) in vec2 a_pos;\n"
-    "layout(location = 1) in vec2 a_uv;\n"
-    "\n"
-    "out vec2 v_uv;\n"
-    "\n"
-    "void main() {\n"
-        "v_uv = a_uv;\n"
-        "gl_Position = vec4(a_pos, 0.0, 1.0);\n"
-    "}\n";
-
+    std::string screen_frag = LoadFile(fragmentFolder + "\\screen.frag");
+    std::string screen_vert = LoadFile(vertexFolder + "\\screen.vert");
     screenShader = CreateProgram(CompileShader(screen_vert, GL_VERTEX_SHADER), CompileShader(screen_frag, GL_FRAGMENT_SHADER));
 
     if (screenShader == 0) return -1;
@@ -515,20 +531,9 @@ int initShaders(SDL_Window* window, const gameState& state){
     // Sprite arrays
     fillSpriteArrays(state);
 
-    // Convert the surfaces to the right format that I input to openGL
-    std::vector<SDL_Surface*> wallsConverted(numWallTexs);
-    for (int i = 0; i < numWallTexs; i++){
-        wallsConverted[i] = SDL_ConvertSurface(state.wallTextures[i].texture, SDL_PIXELFORMAT_RGBA32);
-    }
-
-    std::vector<SDL_Surface*> spritesConverted(numSpriteTexs);
-    for (int i = 0; i < numSpriteTexs; i++){
-        spritesConverted[i] = SDL_ConvertSurface(state.spriteTextures[i].texture, SDL_PIXELFORMAT_RGBA32);
-    }
-
     // Create the output and input textures
     createOutputTextures();
-    createInputTextures(wallsConverted, spritesConverted);
+    createInputTextures(state, numWallTexs, numSpriteTexs, numScreenTexs);
 
     return 1;
 }
@@ -756,4 +761,7 @@ void renderMap(SDL_Window* window, const gameState& state){
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
     drawTexture(screenShader, outputTex);
+
+    // Draw a screen texture
+    drawTexture(screenShader, glScreenTextures[0], 152.0f/255.0f, 0.0f/255.0f, 136.0f/255.0f);
 }
