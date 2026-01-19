@@ -154,14 +154,6 @@ void parseScreenTextures(const std::string& path){
             SDL_BlitSurface(surface, &srcRect, screenTextures[i*5+j].texture, NULL);
 
             screenTextures[i*5+j].texture = flipSurfaceVertical(screenTextures[i*5+j].texture);
-
-            Uint32* pixels = (Uint32*)screenTextures[i*5+j].texture->pixels;
-            Uint32 pixel = pixels[0]; // top-left pixel
-            const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(screenTextures[i*5+j].texture->format);
-            Uint8 r, g, b, a;
-            SDL_GetRGBA(pixel, fmt, NULL, &r, &g, &b, &a);
-
-            printf("Top-left pixel: R=%d G=%d B=%d A=%d\n", r, g, b, a);
         }
     }
 }

@@ -239,6 +239,14 @@ bool createInputTextures(const gameState& state, int numWallTexs, int numSpriteT
     std::vector<SDL_Surface*> screenTextures(numScreenTexs);
     for (int i = 0; i < numScreenTexs; i++){
         screenTextures[i] = SDL_ConvertSurface(state.screenTextures[i].texture, SDL_PIXELFORMAT_RGBA32);
+
+        Uint32* pixels = (Uint32*)screenTextures[i]->pixels;
+        Uint32 pixel = pixels[0]; // top-left pixel
+        const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(screenTextures[i]->format);
+        Uint8 r, g, b, a;
+        SDL_GetRGBA(pixel, fmt, NULL, &r, &g, &b, &a);
+
+        printf("Top-left pixel: R=%d G=%d B=%d A=%d\n", r, g, b, a);
     }
 
     // Wall textures
