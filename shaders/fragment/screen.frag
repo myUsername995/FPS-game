@@ -9,7 +9,7 @@ uniform vec3 filterColor;
 void main() {
     vec4 col = texture(u_tex, v_uv);
 
-    float epsilon = 0.01; // tolerance for color comparison
+    float epsilon = 0.5; // tolerance for color comparison
 
     bool isFiltered = filterColor.x != -1.0 &&
                       abs(col.r - filterColor.r) < epsilon &&
