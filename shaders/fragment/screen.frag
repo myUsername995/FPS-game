@@ -9,8 +9,14 @@ uniform vec3 filterColor;
 void main() {
     vec4 col = texture(u_tex, v_uv);
 
-    // If filterColor.r is -1, that means don't filter at all
-    if (!(col.x == filterColor.x && col.y == filterColor.y && col.z == filterColor.z) || filterColor.x == -1){
+    float epsilon = 0.01; // tolerance for color comparison
+
+    bool isFiltered = filterColor.x != -1.0 &&
+                      abs(col.r - filterColor.r) < epsilon &&
+                      abs(col.g - filterColor.g) < epsilon &&
+                      abs(col.b - filterColor.b) < epsilon;
+
+    if (!isFiltered){
         FragColor = col;
     }
 }

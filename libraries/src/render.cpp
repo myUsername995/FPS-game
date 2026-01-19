@@ -763,5 +763,5 @@ void renderMap(SDL_Window* window, const gameState& state){
     drawTexture(screenShader, outputTex);
 
     // Draw a screen texture
-    drawTexture(screenShader, glScreenTextures[0], 152.0f/255.0f, 0.0f/255.0f, 136.0f/255.0f);
+    drawTexture(screenShader, glScreenTextures[7], 152.0f/255.0f, 0.0f/255.0f, 136.0f/255.0f);
 }
