@@ -141,7 +141,7 @@ void parseScreenTextures(const std::string& path){
     // Every picture is 64 by 64 pixels, we have 3 rows and 5 columns. There is also a 1 pixel gap between each texture.
     for (int i = 0; i < 3; i++){
         for (int j = 0; j < 5; j++){
-            screenTextures[i*5+j].texture = SDL_CreateSurface(64, 64, SDL_PIXELFORMAT_RGBA32);
+            screenTextures[i*5+j].texture = SDL_CreateSurface(64, 64, SDL_PIXELFORMAT_RGBA8888);
             screenTextures[i*5+j].width = 64;
             screenTextures[i*5+j].height = 64;
 
