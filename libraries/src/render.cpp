@@ -309,12 +309,13 @@ bool createInputTextures(const gameState& state, int numWallTexs, int numSpriteT
             return false;
         }
     }
-
     return true;
 }
 
 // GENERATE TEXTURES FOR WALL, FLOOR AND CEILING SHADER
 void generateMapTextures(std::string& wallStr, std::string& floorStr, std::string& ceilingStr, int numTextures){
+    if (numTextures == 0) numTextures = 1;
+
     // The length of a tab
     std::string tab = "    ";
 
@@ -357,7 +358,9 @@ void generateMapTextures(std::string& wallStr, std::string& floorStr, std::strin
 
 // GENERATE TEXTURES FOR SPRITE SHADER
 void generateSpriteTextures(std::string& spriteStr, int numTextures){
-        // The length of a tab
+    if (numTextures == 0) numTextures = 1;
+
+    // The length of a tab
     std::string tab = "    ";
 
     // Insert the uniforms into every string first
@@ -742,25 +745,25 @@ void dispatchShader(shaderType type, const gameState& state){
 
 // Renders walls, floor, ceiling and sprites
 void renderMap(SDL_Window* window, const gameState& state){
-    // // Setup for compute shader dispatches
-    // glBindImageTexture(0, outputTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
-    // glClearTexImage(outputTex, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    // activateWallTextures();  
+    // Setup for compute shader dispatches
+    glBindImageTexture(0, outputTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
+    glClearTexImage(outputTex, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    activateWallTextures();  
 
-    // // Compute everything firsst
-    // dispatchShader(COMPUTE, state);
+    // Compute everything firsst
+    dispatchShader(COMPUTE, state);
 
-    // // Render order doesn't matter, they don't draw over each other
-    // dispatchShader(WALL, state);
+    // Render order doesn't matter, they don't draw over each other
+    dispatchShader(WALL, state);
     // dispatchShader(FLOOR, state);
     // dispatchShader(CEILING, state);
 
     // glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
-    fillSpriteArrays(state);
-    activateSpriteTextures();
-    // After rendering the map, render the sprites
-    dispatchShader(SPRITE, state);
+    // fillSpriteArrays(state);
+    // activateSpriteTextures();
+    // // After rendering the map, render the sprites
+    // dispatchShader(SPRITE, state);
 
     // Ensure writes are visible
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
@@ -768,7 +771,7 @@ void renderMap(SDL_Window* window, const gameState& state){
     drawTexture(screenShader, outputTex);
 
     // if the gunFrame is -1, that means no gun is equipped
-    if (state.player.gunFrame != -1){
+    if (state.player.gunType != -1){
         drawTexture(screenShader, glScreenTextures[state.player.gunFrame], 152.0f/255.0f, 0.0f/255.0f, 136.0f/255.0f);
     }
 }

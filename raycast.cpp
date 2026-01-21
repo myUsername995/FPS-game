@@ -616,9 +616,9 @@ int main(int argc, char* argv[]){
                 case SDL_EVENT_KEY_DOWN: {
                     if (event.key.key == SDLK_1){
                         state.player.gunFrame = 0;
+                        // Unequip
                         if (state.player.gunType == 0){
                             state.player.gunType = -1;
-                            state.player.gunFrame = -1;
                         }
                         else {
                             state.player.gunType = 0;
@@ -627,9 +627,9 @@ int main(int argc, char* argv[]){
                     }
                     else if (event.key.key == SDLK_2){
                         state.player.gunFrame = 0;
+                        // Unequip
                         if (state.player.gunType == 1){
                             state.player.gunType = -1;
-                            state.player.gunFrame = -1;
                         }
                         else {
                             state.player.gunType = 1;

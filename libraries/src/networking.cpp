@@ -23,7 +23,7 @@ struct Network_player {
 
     // Only send the health to the other client and the gun frame, so they can change their health and also render our player
     int8_t health;
-    uint8_t gunFrame;
+    int8_t gunFrame;
 };
 
 static_assert(std::is_trivially_copyable_v<Network_player>);
