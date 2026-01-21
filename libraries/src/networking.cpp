@@ -20,6 +20,10 @@ struct Network_player {
     // Animation related data
     uint8_t isMoving;
     uint8_t animationStep;
+
+    // Only send the health to the other client and the gun frame, so they can change their health and also render our player
+    int8_t health;
+    uint8_t gunFrame;
 };
 
 // The number of none player sprites
@@ -208,44 +212,63 @@ bool Client::receiveData(gameState& state){
             return false;
         }
         if (event.type == ENET_EVENT_TYPE_RECEIVE){
-            // The server sent an std::vector<Network_player>.data() array
-            size_t numPlayers = event.packet->dataLength / sizeof(Network_player);
+            size_t numOtherPlayers = event.packet->dataLength / sizeof(Network_player) - 1;
 
+            Network_player network_player;
             std::vector<Network_player> network_otherPlayers;
-            network_otherPlayers.resize(numPlayers); // allocate space
-            state.otherPlayers.resize(numPlayers);
+            network_otherPlayers.reserve(numOtherPlayers);
+            state.otherPlayers.resize(numOtherPlayers);
+            
+            std::vector<Network_player> network_allPlayers;
+            network_allPlayers.resize(numOtherPlayers+1); // allocate space
+            assert((numOtherPlayers + 1) * sizeof(Network_player) == event.packet->dataLength && "networking.cpp: Network_player size is wrong.");
+            memcpy(network_allPlayers.data(), event.packet->data, event.packet->dataLength);
 
-            assert(network_otherPlayers.size() * sizeof(Network_player) == event.packet->dataLength && 
-                   "networking.cpp: Network_player size is wrong.");
-            memcpy(network_otherPlayers.data(), event.packet->data, event.packet->dataLength);
-
-            // Remove our own player from the otherPlayers array
-            for (int i = 0; i < numPlayers; i++){
-                if (network_otherPlayers[i].playerID == state.player.playerID){
-                    network_otherPlayers.erase(network_otherPlayers.begin() + i);
+            // Remove our own player from the array so it only contains other players
+            int removeIndex = -1;
+            for (int i = 0; i < numOtherPlayers + 1; i++){
+                if (network_allPlayers[i].playerID == state.player.playerID){
+                    network_player = network_allPlayers[i];
+                    removeIndex = i;
                     break;
                 }
             }
-            numPlayers--;
 
-            // Copy into the actual otherPlayers array
-            for (int i = 0; i < numPlayers; i++){
-                state.otherPlayers[i].camera = {0, 0}; // Camera doesn't matter for other players
-                state.otherPlayers[i].lookDir = {network_otherPlayers[i].lookDirX, network_otherPlayers[i].lookDirY};
-                state.otherPlayers[i].playerID = network_otherPlayers[i].playerID;
-                state.otherPlayers[i].username = network_otherPlayers[i].username;
-                state.otherPlayers[i].pos.x = network_otherPlayers[i].posX;
-                state.otherPlayers[i].pos.y = network_otherPlayers[i].posY;
-                state.otherPlayers[i].isMoving = network_otherPlayers[i].isMoving == 1 ? true : false;
-                state.otherPlayers[i].animationStep = network_otherPlayers[i].animationStep;
-                state.otherPlayers[i].ping = network_otherPlayers[i].ping;
+            if (removeIndex == -1){
+                std::cout << "Player was not sent from the server.\n";
+                return false;
             }
 
-            state.numPlayers = numPlayers;
+            network_allPlayers.erase(network_allPlayers.begin() + removeIndex);
+            network_otherPlayers = network_allPlayers;
+
+            auto copyNetworkStruct = [](Player& p, const Network_player& netP) {
+                p.camera = {0, 0}; // Camera doesn't matter for other players
+                p.lookDir = {netP.lookDirX, netP.lookDirY};
+                p.playerID = netP.playerID;
+                p.username = netP.username;
+                p.pos.x = netP.posX;
+                p.pos.y = netP.posY;
+                p.isMoving = (netP.isMoving == 1);
+                p.animationStep = netP.animationStep;
+                p.ping = netP.ping;
+                p.health = netP.health;
+                p.gunFrame = netP.gunFrame;
+            };
+
+            // Handle our player differently
+            copyNetworkStruct(state.player, network_player);
+
+            // Copy into the actual otherPlayers array
+            for (int i = 0; i < numOtherPlayers; i++){
+                copyNetworkStruct(state.otherPlayers[i], network_otherPlayers[i]);
+            }
+
+            state.numPlayers = numOtherPlayers;
             state.fullNumSprites = state.numSprites + state.numPlayers;
             state.sprites.resize(state.fullNumSprites);
-            // Add sprites for the players
-            for (int i = 0; i < numPlayers; i++){
+            // Add sprites for the other players (not for ourselves, as we don't see our own sprite)
+            for (int i = 0; i < numOtherPlayers; i++){
                 Sprite newSprite;
                 newSprite.texture = 0;
                 newSprite.pos = state.otherPlayers[i].pos;
@@ -273,6 +296,8 @@ void Client::sendData(gameState& state){
     p.isMoving = state.player.isMoving;
     p.animationStep = state.player.animationStep;
     p.ping = state.player.ping;
+    p.health = state.player.health;
+    p.gunFrame = state.player.gunFrame;
 
     ENetPacket* packet = enet_packet_create(&p, sizeof(p), ENET_PACKET_FLAG_RELIABLE);
 

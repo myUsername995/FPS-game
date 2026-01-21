@@ -29,8 +29,15 @@ Dependencies:
 #include "render.hpp"               // Abstracts how the rendering is done on the GPU
 #include "gameState.hpp"            // Our gameState struct, stored in an .hpp to make sure we don't include it multiple times
 
+std::string texturesFolder = "textures";
+std::string constTexturesFolder = "constTextures";
+
 int WINDOW_HEIGHT = 800;
 int WINDOW_WIDTH = 800;
+
+const float hitRadius = 1;
+const float playerHealth = 100;
+const std::array<float, 2> gunDamage = {10, 2}; // Amount of damage dealt by gunType "n"
 
 // Textures of the sprites and walls
 std::vector<Texture> wallTextures;
@@ -39,6 +46,18 @@ std::array<Texture, 8> playerTextures;
 std::array<std::array<Texture, 8>, 4> playerRunTextures;
 std::vector<Texture> screenTextures;
 Texture skyTexture;
+
+// Assume these 4 styles exist for all fonts we load
+struct Font {
+    TTF_Font* normal;
+    TTF_Font* bold;
+    TTF_Font* italic;
+    TTF_Font* boldItalic;
+
+    // Metadata
+    std::string name;
+    bool isLoaded = false;
+};
 
 enum textureType {
     TEXTURE_WALL,
@@ -50,6 +69,43 @@ std::pair<float, float> getWidthAndHeight(TTF_Font* font, const std::string& str
     SDL_Surface* surface = TTF_RenderText_Solid(font, str.c_str(), str.length(), {0, 0, 0, 0});
 
     return {(float)surface->w, (float)surface->h};
+}
+
+// Assume the font is named in all uppercase
+bool loadFont(Font& newFont, const std::string& font, int size){
+    newFont.isLoaded = true;
+
+    std::string normal = "fonts\\" + font + "\\" + font + ".TTF";
+    std::string bold = "fonts\\" + font + "\\" + font + "BD.TTF";
+    std::string italic = "fonts\\" + font + "\\" + font + "I.TTF";
+    std::string boldItalic = "fonts\\" + font + "\\" + font + "BI.TTF";
+
+    newFont.normal = TTF_OpenFont(normal.c_str(), size);
+    newFont.bold = TTF_OpenFont(bold.c_str(), size);
+    newFont.italic = TTF_OpenFont(italic.c_str(), size); 
+    newFont.boldItalic = TTF_OpenFont(boldItalic.c_str(), size);
+    newFont.name = font;
+
+    if (!newFont.normal || !newFont.bold || !newFont.italic || !newFont.boldItalic) return false;
+
+    return true;
+}
+
+void deleteFont(Font& curFont){
+    if (curFont.isLoaded){
+        curFont.isLoaded = false;
+
+        TTF_CloseFont(curFont.normal);
+        TTF_CloseFont(curFont.bold);
+        TTF_CloseFont(curFont.italic);
+        TTF_CloseFont(curFont.boldItalic);
+    }
+}
+
+bool reloadFont(Font& newFont, int size){
+    deleteFont(newFont);
+
+    return loadFont(newFont, newFont.name, size);
 }
 
 // OpenGL wants me to flip the surface cuz it renders upside down and stuff
@@ -87,7 +143,8 @@ SDL_Surface* flipSurfaceVertical(SDL_Surface* src) {
 
 // Helper function to parse the player.png picture into the playerTextures array
 void parsePlayerTextures(const std::string& path){
-    SDL_Surface* surface = IMG_Load(path.c_str());
+    std::string inPath = constTexturesFolder + "\\" + path;
+    SDL_Surface* surface = IMG_Load(inPath.c_str());
     if (!surface) {
         SDL_Log("IMG_Load failed: %s", SDL_GetError());
         return;
@@ -130,16 +187,17 @@ void parsePlayerTextures(const std::string& path){
 }
 
 void parseScreenTextures(const std::string& path){
-    screenTextures.resize(15);
+    screenTextures.resize(10);
 
-    SDL_Surface* surface = IMG_Load(path.c_str());
+    std::string inPath = constTexturesFolder + "\\" + path;
+    SDL_Surface* surface = IMG_Load(inPath.c_str());
     if (!surface) {
         SDL_Log("IMG_Load failed: %s", SDL_GetError());
         return;
     }
 
     // Every picture is 64 by 64 pixels, we have 3 rows and 5 columns. There is also a 1 pixel gap between each texture.
-    for (int i = 0; i < 3; i++){
+    for (int i = 0; i < 2; i++){
         for (int j = 0; j < 5; j++){
             screenTextures[i*5+j].texture = SDL_CreateSurface(64, 64, SDL_PIXELFORMAT_RGBA8888);
             screenTextures[i*5+j].width = 64;
@@ -160,7 +218,8 @@ void parseScreenTextures(const std::string& path){
 
 // Loads an image into different arrays
 bool loadImage(textureType type, const std::string& path, int id = 0) {
-    SDL_Surface* surface = IMG_Load(path.c_str());
+    std::string inPath = texturesFolder + "\\" + path;
+    SDL_Surface* surface = IMG_Load(inPath.c_str());
     if (!surface){
         std::cerr << "Couldn't load file: " << path << std::endl;
         return false;
@@ -223,8 +282,11 @@ void cubeToLines(gameState& state){
 }
 
 // Calculate at what height some players head is at
-bool calculatePlayerHead(const gameState& state, int index, TTF_Font*& font, SDL_FRect& headBox){
-    if (index >= state.numPlayers) return false;
+SDL_FRect calculatePlayerHead(const gameState& state, int index, Font& curFont, bool& isOnScreen){
+    if (index >= state.numPlayers){
+        isOnScreen = false;
+        return {};
+    }
 
     Player otherPlayer = state.otherPlayers[index];
 
@@ -262,34 +324,38 @@ bool calculatePlayerHead(const gameState& state, int index, TTF_Font*& font, SDL
 
     // If the player is not on the screen, don't render their name
     if (transformY < 0){
-        return false;
+        isOnScreen = false;
+        return {};
     }
+    isOnScreen = true;
 
     // Change the font size
     float arbitraryConstant = 100;
     float scaleFactor = 1.0f / transformY;
     int fontSize = std::clamp(int(arbitraryConstant * scaleFactor), 8, 100);
 
-    font = TTF_OpenFont("TIMES.TTF", fontSize);
+    reloadFont(curFont, fontSize);
 
-    std::pair<float, float> dims = getWidthAndHeight(font, otherPlayer.username);
+    std::pair<float, float> dims = getWidthAndHeight(curFont.normal, otherPlayer.username);
     float normalizedStartX = ((spriteWidth - dims.first) / 2) / spriteWidth;
     float normalizedStartY = 0.05;
 
+    // Texture to screen
     float screenX = normalizedStartX * spriteWidth + spriteScreenX - spriteWidth / 2;
     float screenY = normalizedStartY * spriteHeight + WINDOW_HEIGHT / 2 - spriteHeight / 2;
 
+    SDL_FRect headBox;
     headBox.x = screenX;
     headBox.y = screenY;
     headBox.w = dims.first;
     headBox.h = dims.second;
 
-    return true;
+    return headBox;
 }
 
-void renderTab(TTF_Font* font, const gameState& state){
+void renderTab(const Font& curFont, const gameState& state){
     // Get the height of the first username (all other usernames should be the same height)
-    std::pair<float, float> userHeights = getWidthAndHeight(font, state.player.username);
+    std::pair<float, float> userHeights = getWidthAndHeight(curFont.normal, state.player.username);
 
     float verticalGap = 10; // The gap between entries
     float rectWidth = 400; // width of the tab
@@ -318,14 +384,15 @@ void renderTab(TTF_Font* font, const gameState& state){
     SDL_FPoint rectStart = {WINDOW_WIDTH / 2 - rectWidth / 2, 0};
     SDL_FPoint textStart = {headerRect.x + 10, headerRect.y};
 
-    auto renderTabEntry = [&textStart, gap1, gap2, font, verticalGap, height, rectWidth](std::string name, std::string ping, std::string kills){
+    auto renderTabEntry = [&textStart, gap1, gap2, verticalGap, height, rectWidth]
+                          (std::string name, std::string ping, std::string kills, TTF_Font* font){
         float curY = textStart.y;
         float centeredY = curY + verticalGap / 2;
         SDL_FPoint userText = {textStart.x, centeredY};
         SDL_FPoint pingText = {textStart.x + gap1, centeredY};
         SDL_FPoint killText = {pingText.x + gap2, centeredY};
         GPURenderRect({userText.x-10, curY, gap1, height+verticalGap}, {255, 255, 255, 255}, false);
-        GPURenderText(font, name, textStart, {255, 255, 255, 255});
+        GPURenderText(font, name, userText, {255, 255, 255, 255});
 
         GPURenderRect({pingText.x-10, curY, gap2, height+verticalGap}, {255, 255, 255, 255}, false);
         GPURenderText(font, ping, pingText, {255, 255, 255, 255});
@@ -335,7 +402,7 @@ void renderTab(TTF_Font* font, const gameState& state){
     };
 
     // Header descriptions
-    renderTabEntry("Username", "Ping", "Kills");
+    renderTabEntry("Username", "Ping", "Kills", curFont.bold);
 
     // Initialise the players array
     std::vector<Player> allPlayers(numEntries);
@@ -346,25 +413,67 @@ void renderTab(TTF_Font* font, const gameState& state){
         rectStart.y += height + verticalGap;
         textStart.y += height + verticalGap;
 
-        renderTabEntry(allPlayers[i].username, std::to_string(allPlayers[i].ping), std::to_string(0));
+        renderTabEntry(allPlayers[i].username, std::to_string(allPlayers[i].ping), std::to_string(0), curFont.normal);
     }
 }
 
-void renderPlayerNames(std::string fontName, const gameState& state){
+void renderPlayerNames(const std::string& fontName, const gameState& state){
+    Font tempFont;
+    tempFont.name = fontName;
+
     for (int i = 0; i < state.numPlayers; i++){
-        TTF_Font* font;
-        SDL_FRect headBox;
         // Render each player's name above their head
-        bool isOnScreen = calculatePlayerHead(state, i, font, headBox);
+        bool isOnScreen;
+
+        SDL_FRect headBox = calculatePlayerHead(state, i, tempFont, isOnScreen);
         if (!isOnScreen) continue;
 
         // Draw a rectangle
         GPURenderRect(headBox, {64, 64, 64, 127}, true);
 
         // Create a new sized font
-        GPURenderText(font, state.otherPlayers[i].username, {headBox.x, headBox.y}, {255, 255, 255, 255});
-        TTF_CloseFont(font);
+        GPURenderText(tempFont.normal, state.otherPlayers[i].username, {headBox.x, headBox.y}, {255, 255, 255, 255});
     }
+
+    deleteFont(tempFont);
+}
+
+// Calculate which player was hit, how much damage was dealt, then advance the shooting animation and resolve health changes
+void resolveShot(gameState& state){
+    state.player.fired = true;
+
+    // The closest player to us gets shot (even if there are multiple hits)
+    double closestHit = INFINITY;
+    int hitIndex = -1;
+
+    // Calculate ray-player intersections
+    Vector ray = state.player.lookDir.normalize();
+    for (int i = 0; i < state.otherPlayers.size(); i++){
+        Player enemy = state.otherPlayers[i];
+        Vector point = Vector(enemy.pos.x - state.player.pos.x, enemy.pos.y - state.player.pos.y).normalize();
+
+        double t = Vector::dot(point, ray) / Vector::dot(ray, ray);
+        // The point is infront of the ray
+        if (t >= 0){
+            double distance = Vector::cross(ray, point) / ray.length();
+
+            if (distance < closestHit){
+                closestHit = distance;
+                hitIndex = i;
+            }
+        }
+    }
+
+    // No player was hit (either no player infront of us, or the shot missed the players hit radius)
+    if (hitIndex == -1 || closestHit > hitRadius) return;
+
+    // Change the other player's health
+    float damageDealt = gunDamage[state.player.gunType];
+    Player& hitPlayer = state.otherPlayers[hitIndex];
+
+    hitPlayer.health -= damageDealt;
+
+    std::cout << "Player we hit: " << hitPlayer.username << std::endl;
 }
 
 int main(int argc, char* argv[]){
@@ -391,33 +500,33 @@ int main(int argc, char* argv[]){
 
     // Convert our map representation to be made up of lines instead of cubes
     cubeToLines(state);
-
+    
     // On connection, send our player info immediately to the other clients
     connection.sendData(state);
 
     // Wall textures
-    loadImage(TEXTURE_WALL, "pics/eagle.png", 0);
-    loadImage(TEXTURE_WALL, "pics/redbrick.png", 1);
-    loadImage(TEXTURE_WALL, "pics/purplestone.png", 2);
-    loadImage(TEXTURE_WALL, "pics/greystone.png", 3);
-    loadImage(TEXTURE_WALL, "pics/bluestone.png", 4);
-    loadImage(TEXTURE_WALL, "pics/mossy.png", 5);
-    loadImage(TEXTURE_WALL, "pics/wood.png", 6);
-    loadImage(TEXTURE_WALL, "pics/colorstone.png", 7);
-    loadImage(TEXTURE_WALL, "pics/sky.jpg", 8);
+    loadImage(TEXTURE_WALL, "eagle.png", 0);
+    loadImage(TEXTURE_WALL, "redbrick.png", 1);
+    loadImage(TEXTURE_WALL, "purplestone.png", 2);
+    loadImage(TEXTURE_WALL, "greystone.png", 3);
+    loadImage(TEXTURE_WALL, "bluestone.png", 4);
+    loadImage(TEXTURE_WALL, "mossy.png", 5);
+    loadImage(TEXTURE_WALL, "wood.png", 6);
+    loadImage(TEXTURE_WALL, "colorstone.png", 7);
+    loadImage(TEXTURE_WALL, "sky.jpg", 8);
     
     // Sprite textures
-    loadImage(TEXTURE_SPRITE, "pics/barrel.png", 0);
-    loadImage(TEXTURE_SPRITE, "pics/pillar.png", 1);
-    loadImage(TEXTURE_SPRITE, "pics/greenlight.png", 2);
+    loadImage(TEXTURE_SPRITE, "barrel.png", 0);
+    loadImage(TEXTURE_SPRITE, "pillar.png", 1);
+    loadImage(TEXTURE_SPRITE, "greenlight.png", 2);
 
     // Sky
-    loadImage(TEXTURE_SKY, "pics/doomSky.png");
+    loadImage(TEXTURE_SKY, "doomSky.png");
 
     // These textures never change, but parsing them everytime we initialise is easier, and probably not that much slower than just 
     // storing the raw binary data in a file
-    parsePlayerTextures("pics/player.png");
-    parseScreenTextures("pics/guns.png");
+    parsePlayerTextures("player.png");
+    parseScreenTextures("guns.png");
 
     // Convert the 3 different sprite texture arrays into one flattened one (0 - 32 -> player run textures, 32 - 40 -> player textures, 
     // 40 - x -> sprite textures)
@@ -446,12 +555,18 @@ int main(int argc, char* argv[]){
     state.screenTextures = screenTextures;
     if (initShaders(window, state) == -1) return 0;
 
-    TTF_Font* font = TTF_OpenFont("Roboto_Condensed-Black.ttf", 20);
-    TTF_Font* font2 = TTF_OpenFont("TIMES.TTF", 15);
+    Font arial, times;
+    loadFont(arial, "ARIAL", 20);
+    loadFont(times, "TIMES", 20);
 
     double FPSCap = 1000;
     double FPS = 0;
     double dt = 0;
+
+    double gunAnimationSpeed = 0.5; // The amount of seconds between each frame of the animation
+    double gunAnimationAccumulate = 0;
+    double gunShootSpeed = 0.5; // The amount of seconds you have to wait before you can shoot again
+    double gunShootAccumulate = 0;
 
     double playerSpeed = 0.005;
     double rotationSpeed = 0.01;
@@ -465,7 +580,6 @@ int main(int argc, char* argv[]){
 
     Clk clock; Clk pingTime;
     bool run = true;
-
     while (run){
         clock.begin();
         GPUClearScreen();
@@ -493,6 +607,27 @@ int main(int argc, char* argv[]){
                 case SDL_EVENT_MOUSE_BUTTON_UP: {
                     if (event.button.button == SDL_BUTTON_RIGHT){
                         rightMouseButtonDown = false;
+                    }
+                    break;
+                }
+                case SDL_EVENT_KEY_DOWN: {
+                    if (event.key.key == SDLK_1){
+                        state.player.gunFrame = 0;
+                        if (state.player.gunType == 0){
+                            state.player.gunType = -1;
+                        }
+                        else {
+                            state.player.gunType = 0;
+                        }
+                    }
+                    else if (event.key.key == SDLK_2){
+                        state.player.gunFrame = 0;
+                        if (state.player.gunType == 1){
+                            state.player.gunType = -1;
+                        }
+                        else {
+                            state.player.gunType = 1;
+                        }
                     }
                     break;
                 }
@@ -555,7 +690,29 @@ int main(int argc, char* argv[]){
 
         // Get the mouse state
         float x, y;
-        SDL_GetMouseState(&x, &y);
+        SDL_MouseButtonFlags mouse = SDL_GetMouseState(&x, &y);
+
+        // Shooting with a gun
+        if ((mouse & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) && gunShootAccumulate >= gunShootSpeed){
+            std::cout << "Fired!\n";
+            gunShootAccumulate = 0;
+
+            resolveShot(state);
+        }
+        
+        // Render the shooting animation (own player's view)
+        if (state.player.fired && gunAnimationAccumulate >= gunAnimationSpeed){
+            gunAnimationAccumulate = 0;
+
+            // If we reached the end of the animation, go back to just holding the gun
+            if (state.player.gunFrame = 4){
+                state.player.fired = false;
+                state.player.gunFrame = 0;
+            }
+            else {
+                state.player.gunFrame++;
+            }
+        }
 
         bool cameraChanged = rightMouseButtonDown;
         if (rightMouseButtonDown){
@@ -598,21 +755,21 @@ int main(int argc, char* argv[]){
         renderMap(window, state);
 
         // Render player's names above their heads
-        renderPlayerNames("TIMES.TTF", state);
+        renderPlayerNames("TIMES", state);
 
         // Tab pressed
         if (keyboardState[SDL_SCANCODE_TAB]){
             // Render player's names on the tab
-            renderTab(font2, state);
+            renderTab(times, state);
         }
 
-        SDL_FRect rect = GPURenderText(font, "FPS: " + std::to_string(FPS), {10, 10}, {255, 255, 255, 255});
+        SDL_FRect rect = GPURenderText(arial.normal, "FPS: " + std::to_string(FPS), {10, 10}, {255, 255, 255, 255});
 
         rect.y += rect.h + 10;
-        rect = GPURenderText(font, "Speed: " + std::to_string(playerSpeed), {rect.x, rect.y}, {255, 255, 255, 255});
+        rect = GPURenderText(arial.normal, "Speed: " + std::to_string(playerSpeed), {rect.x, rect.y}, {255, 255, 255, 255});
 
         rect.y += rect.h + 10;
-        rect = GPURenderText(font, "Ping: " + std::to_string(state.player.ping), {rect.x, rect.y}, {255, 255, 255, 255});
+        rect = GPURenderText(arial.normal, "Ping: " + std::to_string(state.player.ping), {rect.x, rect.y}, {255, 255, 255, 255});
 
         SDL_GL_SwapWindow(window);
 
@@ -622,10 +779,15 @@ int main(int argc, char* argv[]){
 
         FPS = clock.calculateFPS();
         dt = clock.getTime();
+
+        gunAnimationAccumulate += dt;
+        gunShootAccumulate += dt;
     }
 
     // Disconnect from the server
     connection.disconnectFromServer();
+    deleteFont(arial);
+    deleteFont(times);
 
     return 0;
 }

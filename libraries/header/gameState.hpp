@@ -17,11 +17,18 @@ class Vector {
         }
         ~Vector(){}
 
-        double length(){
+        static double dot(const Vector& v1, const Vector& v2){
+            return v1.x * v2.x + v1.y * v2.y;
+        }
+        static double cross(const Vector& v1, const Vector& v2){
+            return v1.x * v2.y - v1.y * v2.x;
+        }
+
+        double length() const {
             return std::sqrt(Vector::x * Vector::x + Vector::y * Vector::y);
         }
 
-        Vector normalize(){
+        Vector normalize() const {
             double length = Vector::length();
 
             return Vector(x / length, y / length);
@@ -82,6 +89,11 @@ class Player {
         // Use this to animate players
         bool isMoving = false;
         int animationStep = 0;
+
+        int health = 100;
+        int gunFrame = 0;
+        int gunType = -1;        // 0 -> pistol 1 -> bigger gun thingy
+        bool fired;
 
         double ping;
 };

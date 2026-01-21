@@ -39,6 +39,10 @@ struct Network_player {
     // Animation related data
     uint8_t isMoving;
     uint8_t animationStep;
+
+    // Only send the health to the other client and the gun frame, so they can change their health and also render our player
+    int8_t health;
+    uint8_t gunFrame;
 };
 
 struct ClientData {

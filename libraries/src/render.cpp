@@ -762,6 +762,9 @@ void renderMap(SDL_Window* window, const gameState& state){
 
     drawTexture(screenShader, outputTex);
 
-    // Draw a screen texture
-    drawTexture(screenShader, glScreenTextures[7], 152.0f/255.0f, 0.0f/255.0f, 136.0f/255.0f);
+    // // if the gunFrame is -1, that means no gun is equipped
+    // if (state.player.gunFrame != -1){
+    //     std::cout << state.player.gunFrame << std::endl;
+    //     drawTexture(screenShader, glScreenTextures[state.player.gunFrame], 152.0f/255.0f, 0.0f/255.0f, 136.0f/255.0f);
+    // }
 }
