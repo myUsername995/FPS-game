@@ -26,6 +26,9 @@ struct Network_player {
     uint8_t gunFrame;
 };
 
+static_assert(std::is_trivially_copyable_v<Network_player>);
+static_assert(sizeof(Network_player) == 72);
+
 // The number of none player sprites
 bool Client::connectToServer(gameState& state, std::string serverIP){
     Client::client = enet_host_create(NULL, 1, 2, 0, 0);
@@ -66,7 +69,6 @@ bool Client::connectToServer(gameState& state, std::string serverIP){
     // Wait to receive the packets:
     // 1. playerID, 2. map dimensions, 3. map data 4. sprites length 5. sprites data
 
-    bool receivedPacket = false;
     int numPacketsReceived = 0;
     while (numPacketsReceived < 5){
         bool receivedPacket = false;
@@ -216,17 +218,20 @@ bool Client::receiveData(gameState& state){
 
             Network_player network_player;
             std::vector<Network_player> network_otherPlayers;
-            network_otherPlayers.reserve(numOtherPlayers);
             state.otherPlayers.resize(numOtherPlayers);
             
             std::vector<Network_player> network_allPlayers;
             network_allPlayers.resize(numOtherPlayers+1); // allocate space
-            assert((numOtherPlayers + 1) * sizeof(Network_player) == event.packet->dataLength && "networking.cpp: Network_player size is wrong.");
+            if ((numOtherPlayers + 1) * sizeof(Network_player) != event.packet->dataLength){
+                std::cout << "Network data was sent wrongly.\n";
+                enet_packet_destroy(event.packet);
+                return false;
+            }
             memcpy(network_allPlayers.data(), event.packet->data, event.packet->dataLength);
 
             // Remove our own player from the array so it only contains other players
             int removeIndex = -1;
-            for (int i = 0; i < numOtherPlayers + 1; i++){
+            for (size_t i = 0; i < numOtherPlayers + 1; i++){
                 if (network_allPlayers[i].playerID == state.player.playerID){
                     network_player = network_allPlayers[i];
                     removeIndex = i;
@@ -236,6 +241,7 @@ bool Client::receiveData(gameState& state){
 
             if (removeIndex == -1){
                 std::cout << "Player was not sent from the server.\n";
+                enet_packet_destroy(event.packet);
                 return false;
             }
 
@@ -277,6 +283,8 @@ bool Client::receiveData(gameState& state){
 
                 state.sprites[state.numSprites + i] = newSprite;
             }
+
+            enet_packet_destroy(event.packet);
         }
     }
 

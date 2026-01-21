@@ -45,6 +45,8 @@ struct Network_player {
     uint8_t gunFrame;
 };
 
+static_assert(sizeof(Network_player) == 72);
+
 struct ClientData {
     uint32_t playerID;
     std::string username;
@@ -86,7 +88,7 @@ bool readMapData(std::string fileName, std::vector<int>& worldMap, std::vector<s
     return true;
 }
 
-uint32_t findAvailableID(std::array<bool, 100>& IDs){
+int findAvailableID(std::array<bool, 100>& IDs){
     for (uint32_t i = 0; i < 100; i++){
         // true -> available
         if (IDs[i]){
@@ -99,7 +101,7 @@ uint32_t findAvailableID(std::array<bool, 100>& IDs){
 }
 
 // Return the index into the players array, based on a playerID
-uint32_t findPlayerID(const std::vector<Network_player>& players, int id){
+int findPlayerID(const std::vector<Network_player>& players, int id){
     for (uint32_t i = 0; i < players.size(); i++){
         if (players[i].playerID == id){
             return i;
@@ -186,7 +188,7 @@ int main(int argc, char* argv[]){
                     }
 
                     // Give him an ID
-                    uint32_t playerID = findAvailableID(availableIDs);
+                    int playerID = findAvailableID(availableIDs);
                     if (playerID == -1){
                         std::cout << "Too many players, can't assign ID to " << username << ".\n";
                         enet_peer_reset(event.peer); break;

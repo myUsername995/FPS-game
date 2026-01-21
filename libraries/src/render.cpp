@@ -91,7 +91,7 @@ static int numSprites;
 static std::vector<GLuint> glWallTextures;     // Stores the ID of each wall texture
 static std::vector<GLuint> glSpriteTextures;   // Stores the ID of each sprite texture (players too)
 static std::vector<GLuint> glScreenTextures;
-static GLuint playerTextureID;
+static GLuint playerTextureID = 0;
 
 // Globals for VAO/VBO/EBO
 static GLuint quadVAO = 0, quadVBO = 0, quadEBO = 0;
@@ -464,6 +464,11 @@ void initBuffers(){
 
 // Called once at initialisation
 int initShaders(SDL_Window* window, const gameState& state){
+    GLint maxUnits;
+    glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &maxUnits);
+
+    std::cout << "max texture units: " << maxUnits << std::endl;
+
     // Resize the window
     getWindowSize(window);
     int numWallTexs = state.wallTextures.size();
@@ -737,20 +742,20 @@ void dispatchShader(shaderType type, const gameState& state){
 
 // Renders walls, floor, ceiling and sprites
 void renderMap(SDL_Window* window, const gameState& state){
-    // Setup for compute shader dispatches
-    glBindImageTexture(0, outputTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
-    glClearTexImage(outputTex, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    activateWallTextures();  
+    // // Setup for compute shader dispatches
+    // glBindImageTexture(0, outputTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
+    // glClearTexImage(outputTex, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    // activateWallTextures();  
 
-    // Compute everything firsst
-    dispatchShader(COMPUTE, state);
+    // // Compute everything firsst
+    // dispatchShader(COMPUTE, state);
 
-    // Render order doesn't matter, they don't draw over each other
-    dispatchShader(WALL, state);
-    dispatchShader(FLOOR, state);
-    dispatchShader(CEILING, state);
+    // // Render order doesn't matter, they don't draw over each other
+    // dispatchShader(WALL, state);
+    // dispatchShader(FLOOR, state);
+    // dispatchShader(CEILING, state);
 
-    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+    // glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
     fillSpriteArrays(state);
     activateSpriteTextures();
@@ -762,9 +767,8 @@ void renderMap(SDL_Window* window, const gameState& state){
 
     drawTexture(screenShader, outputTex);
 
-    // // if the gunFrame is -1, that means no gun is equipped
-    // if (state.player.gunFrame != -1){
-    //     std::cout << state.player.gunFrame << std::endl;
-    //     drawTexture(screenShader, glScreenTextures[state.player.gunFrame], 152.0f/255.0f, 0.0f/255.0f, 136.0f/255.0f);
-    // }
+    // if the gunFrame is -1, that means no gun is equipped
+    if (state.player.gunFrame != -1){
+        drawTexture(screenShader, glScreenTextures[state.player.gunFrame], 152.0f/255.0f, 0.0f/255.0f, 136.0f/255.0f);
+    }
 }

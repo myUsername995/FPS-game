@@ -6,5 +6,5 @@ CXX_DEFINES =
 
 CXX_INCLUDES = @CMakeFiles/raycast.dir/includes_CXX.rsp
 
-CXX_FLAGS =  -O3 -g -std=gnu++17
+CXX_FLAGS =  -g -O0 -std=gnu++17
 

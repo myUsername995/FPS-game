@@ -109,36 +109,39 @@ bool reloadFont(Font& newFont, int size){
 }
 
 // OpenGL wants me to flip the surface cuz it renders upside down and stuff
-SDL_Surface* flipSurfaceVertical(SDL_Surface* src) {
-    if (!src) return nullptr;
+void flipSurfaceVertical(SDL_Surface** src) {
+    if (!src) return;
 
     // Create a new surface with the same format and size
-    SDL_Surface* flipped = SDL_CreateSurface(src->w, src->h, src->format);
+    SDL_Surface* flipped = SDL_CreateSurface((*src)->w, (*src)->h, (*src)->format);
     if (!flipped) {
         std::cerr << "Failed to create surface: " << SDL_GetError() << "\n";
-        return nullptr;
+        return;
     }
 
-    SDL_LockSurface(src);
+    SDL_LockSurface(*src);
     SDL_LockSurface(flipped);
 
-    int pitch = src->pitch; // bytes per row
-    uint8_t* srcPixels = (uint8_t*)src->pixels;
+    int pitch = (*src)->pitch; // bytes per row
+    uint8_t* srcPixels = (uint8_t*)(*src)->pixels;
     uint8_t* dstPixels = (uint8_t*)flipped->pixels;
 
     // Copy rows from bottom to top
-    for (int y = 0; y < src->h; ++y) {
+    for (int y = 0; y < (*src)->h; ++y) {
         memcpy(
             dstPixels + y * pitch,                // destination row
-            srcPixels + (src->h - 1 - y) * pitch, // source row from bottom
+            srcPixels + ((*src)->h - 1 - y) * pitch, // source row from bottom
             pitch
         );
     }
 
-    SDL_UnlockSurface(src);
+    SDL_UnlockSurface(*src);
     SDL_UnlockSurface(flipped);
 
-    return flipped;
+    // Free the old surface and replace with the flipped one
+    SDL_Surface* temp = *src;
+    *src = flipped;
+    SDL_DestroySurface(temp);
 }
 
 // Helper function to parse the player.png picture into the playerTextures array
@@ -168,7 +171,7 @@ void parsePlayerTextures(const std::string& path){
                 SDL_Rect srcRect = {x, y, 64, 64};
                 SDL_BlitSurface(surface, &srcRect, playerTextures[i].texture, NULL);
 
-                playerTextures[i].texture = flipSurfaceVertical(playerTextures[i].texture);
+                flipSurfaceVertical(&playerTextures[i].texture);
             }
             else {
                 playerRunTextures[j-1][i].texture = SDL_CreateSurface(64, 64, SDL_PIXELFORMAT_RGBA8888);
@@ -180,7 +183,7 @@ void parsePlayerTextures(const std::string& path){
                 SDL_Rect srcRect = {x, y, 64, 64};
                 SDL_BlitSurface(surface, &srcRect, playerRunTextures[j-1][i].texture, NULL);
 
-                playerRunTextures[j-1][i].texture = flipSurfaceVertical(playerRunTextures[j-1][i].texture);
+                flipSurfaceVertical(&playerRunTextures[j-1][i].texture);
             }
         }
     }
@@ -211,7 +214,7 @@ void parseScreenTextures(const std::string& path){
 
             SDL_BlitSurface(surface, &srcRect, screenTextures[i*5+j].texture, NULL);
 
-            screenTextures[i*5+j].texture = flipSurfaceVertical(screenTextures[i*5+j].texture);
+            flipSurfaceVertical(&screenTextures[i*5+j].texture);
         }
     }
 }
@@ -242,7 +245,7 @@ bool loadImage(textureType type, const std::string& path, int id = 0) {
         }
         spriteTextures[id] = tex;
 
-        spriteTextures[id].texture = flipSurfaceVertical(spriteTextures[id].texture);
+        flipSurfaceVertical(&spriteTextures[id].texture);
     }
     else if (type == TEXTURE_SKY){
         skyTexture = tex;
@@ -615,18 +618,22 @@ int main(int argc, char* argv[]){
                         state.player.gunFrame = 0;
                         if (state.player.gunType == 0){
                             state.player.gunType = -1;
+                            state.player.gunFrame = -1;
                         }
                         else {
                             state.player.gunType = 0;
+                            state.player.gunFrame = 0;
                         }
                     }
                     else if (event.key.key == SDLK_2){
                         state.player.gunFrame = 0;
                         if (state.player.gunType == 1){
                             state.player.gunType = -1;
+                            state.player.gunFrame = -1;
                         }
                         else {
                             state.player.gunType = 1;
+                            state.player.gunFrame = 5;
                         }
                     }
                     break;
