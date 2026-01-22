@@ -37,7 +37,10 @@ int WINDOW_WIDTH = 800;
 
 const float hitRadius = 1;
 const float playerHealth = 100;
-const std::array<float, 2> gunDamage = {10, 2}; // Amount of damage dealt by gunType "n"
+constexpr int numGuns = 2;
+
+const double walkSpeed = 0.005;
+const double sprintSpeed = 0.008;
 
 // Textures of the sprites and walls
 std::vector<Texture> wallTextures;
@@ -57,6 +60,18 @@ struct Font {
     // Metadata
     std::string name;
     bool isLoaded = false;
+};
+
+struct gunAttributes {
+    float damage;
+    float shootSpeed;
+    float reloadSpeed;
+    bool fullAuto;
+};
+
+const std::array<gunAttributes, numGuns> guns = {
+    gunAttributes{20, 250, 1000, false},
+    gunAttributes{4, 50, 1500, true}
 };
 
 enum textureType {
@@ -106,6 +121,15 @@ bool reloadFont(Font& newFont, int size){
     deleteFont(newFont);
 
     return loadFont(newFont, newFont.name, size);
+}
+
+// Get the gun animation frame (linear array) based on the gunType and offset (for animation)
+int getGunFrame(int gunType, int offset){
+    // Bounds checking
+    if (gunType < 0 || gunType >= numGuns) return 0;
+    if (offset < 0 || offset >= 5) return 0;
+
+    return gunType * 5 + offset;
 }
 
 // OpenGL wants me to flip the surface cuz it renders upside down and stuff
@@ -443,8 +467,6 @@ void renderPlayerNames(const std::string& fontName, const gameState& state){
 
 // Calculate which player was hit, how much damage was dealt, then advance the shooting animation and resolve health changes
 void resolveShot(gameState& state){
-    state.player.fired = true;
-
     // The closest player to us gets shot (even if there are multiple hits)
     double closestHit = INFINITY;
     int hitIndex = -1;
@@ -453,30 +475,33 @@ void resolveShot(gameState& state){
     Vector ray = state.player.lookDir.normalize();
     for (int i = 0; i < state.otherPlayers.size(); i++){
         Player enemy = state.otherPlayers[i];
-        Vector point = Vector(enemy.pos.x - state.player.pos.x, enemy.pos.y - state.player.pos.y).normalize();
+        Vector point = Vector(enemy.pos.x - state.player.pos.x, enemy.pos.y - state.player.pos.y);
 
-        double t = Vector::dot(point, ray) / Vector::dot(ray, ray);
+        double t = Vector::dot(point, ray);
         // The point is infront of the ray
-        if (t >= 0){
-            double distance = Vector::cross(ray, point) / ray.length();
+        if (t < 0) continue;
 
-            if (distance < closestHit){
-                closestHit = distance;
-                hitIndex = i;
-            }
+        double perpDistance = std::abs(Vector::cross(ray, point)) / ray.length();
+
+        if (perpDistance > hitRadius) continue;
+
+        double distance = point.length();
+        if (distance < closestHit){
+            closestHit = distance;
+            hitIndex = i;
         }
     }
 
-    // No player was hit (either no player infront of us, or the shot missed the players hit radius)
-    if (hitIndex == -1 || closestHit > hitRadius) return;
+    // No player was hit 
+    if (hitIndex == -1) return;
 
     // Change the other player's health
-    float damageDealt = gunDamage[state.player.gunType];
+    float damageDealt = guns[state.player.gunType].damage;
     Player& hitPlayer = state.otherPlayers[hitIndex];
 
     hitPlayer.health -= damageDealt;
 
-    std::cout << "Player we hit: " << hitPlayer.username << std::endl;
+    std::cout << hitPlayer.username << std::endl;
 }
 
 int main(int argc, char* argv[]){
@@ -566,12 +591,11 @@ int main(int argc, char* argv[]){
     double FPS = 0;
     double dt = 0;
 
-    double gunAnimationSpeed = 0.5; // The amount of seconds between each frame of the animation
     double gunAnimationAccumulate = 0;
-    double gunShootSpeed = 0.5; // The amount of seconds you have to wait before you can shoot again
     double gunShootAccumulate = 0;
+    double gunFrame = 0;
 
-    double playerSpeed = 0.005;
+    double playerSpeed = walkSpeed;
     double rotationSpeed = 0.01;
     double animationSpeed = 0.05; // The step size used to get from one frame to the next (1 -> normal)
     double animationAccumulate = 0; // Where we accumulate the step sizes that might be fractional
@@ -579,6 +603,8 @@ int main(int argc, char* argv[]){
     SDL_Event event;
 
     bool rightMouseButtonDown = false;
+    bool leftMouseDown = false;
+    bool prevLeftMouseDown = false;
     SDL_FPoint start_pan = {0, 0};
 
     Clk clock; Clk pingTime;
@@ -622,10 +648,10 @@ int main(int argc, char* argv[]){
                         }
                         else {
                             state.player.gunType = 0;
-                            state.player.gunFrame = 0;
                         }
+                        state.player.gunFrame = getGunFrame(state.player.gunType, 0);
                     }
-                    else if (event.key.key == SDLK_2){
+                    if (event.key.key == SDLK_2){
                         state.player.gunFrame = 0;
                         // Unequip
                         if (state.player.gunType == 1){
@@ -633,17 +659,19 @@ int main(int argc, char* argv[]){
                         }
                         else {
                             state.player.gunType = 1;
-                            state.player.gunFrame = 5;
                         }
+                        state.player.gunFrame = getGunFrame(state.player.gunType, 0);
+                    }
+                    // Sprint
+                    if (event.key.key == SDLK_LSHIFT){
+                        playerSpeed = sprintSpeed;
                     }
                     break;
                 }
-                case SDL_EVENT_MOUSE_WHEEL: {
-                    playerSpeed += event.wheel.y * playerSpeed / 20;
-
-                    // Make the animation faster as the player gets faster
-                    animationSpeed = playerSpeed * 50;
-                    break;
+                case SDL_EVENT_KEY_UP: {
+                    if (event.key.key == SDLK_LSHIFT){
+                        playerSpeed = walkSpeed;
+                    }
                 }
             }
         }
@@ -699,26 +727,39 @@ int main(int argc, char* argv[]){
         float x, y;
         SDL_MouseButtonFlags mouse = SDL_GetMouseState(&x, &y);
 
+        bool leftMouseDown = mouse & SDL_BUTTON_MASK(SDL_BUTTON_LEFT);
+        bool leftMousePressed = leftMouseDown && !prevLeftMouseDown;
+
+        gunAttributes gun = guns[state.player.gunType];
+        bool canShoot =
+            gunShootAccumulate >= gun.shootSpeed && (
+            (gun.fullAuto && leftMouseDown) ||     // hold to shoot
+            (!gun.fullAuto && leftMousePressed)    // click to shoot
+        );
+
         // Shooting with a gun
-        if ((mouse & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) && gunShootAccumulate >= gunShootSpeed){
-            std::cout << "Fired!\n";
+        if (canShoot){
+            state.player.fired = true;
+
             gunShootAccumulate = 0;
+            gunAnimationAccumulate = 0;
 
             resolveShot(state);
         }
-        
         // Render the shooting animation (own player's view)
-        if (state.player.fired && gunAnimationAccumulate >= gunAnimationSpeed){
+        if (state.player.fired && gunAnimationAccumulate >= guns[state.player.gunType].shootSpeed / 4){
             gunAnimationAccumulate = 0;
 
             // If we reached the end of the animation, go back to just holding the gun
-            if (state.player.gunFrame = 4){
+            if (gunFrame >= 4){
+                gunFrame = 0;
                 state.player.fired = false;
-                state.player.gunFrame = 0;
             }
             else {
-                state.player.gunFrame++;
+                gunFrame++;
             }
+
+            state.player.gunFrame = getGunFrame(state.player.gunType, gunFrame);
         }
 
         bool cameraChanged = rightMouseButtonDown;
@@ -778,6 +819,9 @@ int main(int argc, char* argv[]){
         rect.y += rect.h + 10;
         rect = GPURenderText(arial.normal, "Ping: " + std::to_string(state.player.ping), {rect.x, rect.y}, {255, 255, 255, 255});
 
+        rect.y += rect.h + 10;
+        rect = GPURenderText(arial.normal, "Health: " + std::to_string(state.player.health), {rect.x, rect.y}, {255, 255, 255, 255});
+
         SDL_GL_SwapWindow(window);
 
         clock.end();
@@ -789,6 +833,8 @@ int main(int argc, char* argv[]){
 
         gunAnimationAccumulate += dt;
         gunShootAccumulate += dt;
+
+        prevLeftMouseDown = leftMouseDown;
     }
 
     // Disconnect from the server

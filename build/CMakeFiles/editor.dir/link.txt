@@ -1,3 +1,0 @@
-"C:\Program Files\CMake\bin\cmake.exe" -E rm -f CMakeFiles\editor.dir/objects.a
-C:\msys64\ucrt64\bin\ar.exe qc CMakeFiles\editor.dir/objects.a @CMakeFiles\editor.dir\objects1.rsp
-C:\msys64\ucrt64\bin\c++.exe  -g -O0 -Wl,--whole-archive CMakeFiles\editor.dir/objects.a -Wl,--no-whole-archive -o C:\Files\Cpp_files\silly\MultiplayerFPS\editor.exe -Wl,--out-implib,libeditor.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\editor.dir\linkLibs.rsp

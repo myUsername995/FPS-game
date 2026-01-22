@@ -467,11 +467,6 @@ void initBuffers(){
 
 // Called once at initialisation
 int initShaders(SDL_Window* window, const gameState& state){
-    GLint maxUnits;
-    glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &maxUnits);
-
-    std::cout << "max texture units: " << maxUnits << std::endl;
-
     // Resize the window
     getWindowSize(window);
     int numWallTexs = state.wallTextures.size();
@@ -755,15 +750,15 @@ void renderMap(SDL_Window* window, const gameState& state){
 
     // Render order doesn't matter, they don't draw over each other
     dispatchShader(WALL, state);
-    // dispatchShader(FLOOR, state);
-    // dispatchShader(CEILING, state);
+    dispatchShader(FLOOR, state);
+    dispatchShader(CEILING, state);
 
-    // glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
-    // fillSpriteArrays(state);
-    // activateSpriteTextures();
-    // // After rendering the map, render the sprites
-    // dispatchShader(SPRITE, state);
+    fillSpriteArrays(state);
+    activateSpriteTextures();
+    // After rendering the map, render the sprites
+    dispatchShader(SPRITE, state);
 
     // Ensure writes are visible
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);

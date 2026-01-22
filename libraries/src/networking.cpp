@@ -217,8 +217,7 @@ bool Client::receiveData(gameState& state){
             size_t numOtherPlayers = event.packet->dataLength / sizeof(Network_player) - 1;
 
             Network_player network_player;
-            std::vector<Network_player> network_otherPlayers;
-            state.otherPlayers.resize(numOtherPlayers);
+            std::vector<Network_player> network_otherPlayers(numOtherPlayers);
             
             std::vector<Network_player> network_allPlayers;
             network_allPlayers.resize(numOtherPlayers+1); // allocate space
@@ -248,7 +247,7 @@ bool Client::receiveData(gameState& state){
             network_allPlayers.erase(network_allPlayers.begin() + removeIndex);
             network_otherPlayers = network_allPlayers;
 
-            auto copyNetworkStruct = [](Player& p, const Network_player& netP) {
+            auto copyNetworkStruct = [](Player& p, const Network_player& netP){
                 p.camera = {0, 0}; // Camera doesn't matter for other players
                 p.lookDir = {netP.lookDirX, netP.lookDirY};
                 p.playerID = netP.playerID;
@@ -262,9 +261,10 @@ bool Client::receiveData(gameState& state){
                 p.gunFrame = netP.gunFrame;
             };
 
-            // Handle our player differently
-            copyNetworkStruct(state.player, network_player);
+            // Only copy the health for the player
+            state.player.health = network_player.health;
 
+            state.otherPlayers.resize(numOtherPlayers);
             // Copy into the actual otherPlayers array
             for (int i = 0; i < numOtherPlayers; i++){
                 copyNetworkStruct(state.otherPlayers[i], network_otherPlayers[i]);
