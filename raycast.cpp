@@ -385,9 +385,10 @@ void renderTab(const Font& curFont, const gameState& state){
     std::pair<float, float> userHeights = getWidthAndHeight(curFont.normal, state.player.username);
 
     float verticalGap = 10; // The gap between entries
-    float rectWidth = 400; // width of the tab
+    float rectWidth = 500; // width of the tab
     float gap1 = 150; // gap between username and ping
     float gap2 = 100; // gap between the ping and kills
+    float gap3 = 100; // gap between the kills and health
 
     float height = userHeights.second; // Height of each username
     SDL_Color tabColor = {64, 64, 64, 127};
@@ -411,25 +412,29 @@ void renderTab(const Font& curFont, const gameState& state){
     SDL_FPoint rectStart = {WINDOW_WIDTH / 2 - rectWidth / 2, 0};
     SDL_FPoint textStart = {headerRect.x + 10, headerRect.y};
 
-    auto renderTabEntry = [&textStart, gap1, gap2, verticalGap, height, rectWidth]
-                          (std::string name, std::string ping, std::string kills, TTF_Font* font){
+    auto renderTabEntry = [&textStart, gap1, gap2, gap3, verticalGap, height, rectWidth]
+                          (std::string name, std::string ping, std::string kills, std::string health, TTF_Font* font){
         float curY = textStart.y;
         float centeredY = curY + verticalGap / 2;
         SDL_FPoint userText = {textStart.x, centeredY};
         SDL_FPoint pingText = {textStart.x + gap1, centeredY};
         SDL_FPoint killText = {pingText.x + gap2, centeredY};
+        SDL_FPoint healthText = {killText.x + gap3, centeredY};
         GPURenderRect({userText.x-10, curY, gap1, height+verticalGap}, {255, 255, 255, 255}, false);
         GPURenderText(font, name, userText, {255, 255, 255, 255});
 
         GPURenderRect({pingText.x-10, curY, gap2, height+verticalGap}, {255, 255, 255, 255}, false);
         GPURenderText(font, ping, pingText, {255, 255, 255, 255});
 
-        GPURenderRect({killText.x-10, curY, rectWidth - gap2 - gap1, height+verticalGap}, {255, 255, 255, 255}, false);
+        GPURenderRect({killText.x-10, curY, gap3, height+verticalGap}, {255, 255, 255, 255}, false);
         GPURenderText(font, kills, killText, {255, 255, 255, 255});
+
+        GPURenderRect({healthText.x-10, curY, rectWidth - (gap1 + gap2 + gap3), height+verticalGap}, {255, 255, 255, 255}, false);
+        GPURenderText(font, health, healthText, {255, 255, 255, 255});
     };
 
     // Header descriptions
-    renderTabEntry("Username", "Ping", "Kills", curFont.bold);
+    renderTabEntry("Username", "Ping", "Kills", "Health", curFont.bold);
 
     // Initialise the players array
     std::vector<Player> allPlayers(numEntries);
@@ -440,7 +445,8 @@ void renderTab(const Font& curFont, const gameState& state){
         rectStart.y += height + verticalGap;
         textStart.y += height + verticalGap;
 
-        renderTabEntry(allPlayers[i].username, std::to_string(allPlayers[i].ping), std::to_string(0), curFont.normal);
+        renderTabEntry(allPlayers[i].username, std::to_string(allPlayers[i].ping), std::to_string(0), std::to_string(allPlayers[i].health), 
+                       curFont.normal);
     }
 }
 
