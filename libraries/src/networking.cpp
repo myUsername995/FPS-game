@@ -208,12 +208,14 @@ bool Client::receiveData(gameState& state){
     ENetEvent event;
     while (enet_host_service(Client::client, &event, 0) > 0){
         received = true;
-        if (event.type == ENET_EVENT_TYPE_DISCONNECT){
-            std::cout << "Disconnected from the server.\n";
-            
-            return false;
-        }
         if (event.type == ENET_EVENT_TYPE_RECEIVE){
+            // Check if a disconnect message was sent (0 length packet)
+            if (event.packet->dataLength == 0){
+                std::cout << "The server shut down.\n";
+
+                exit(0);
+            }
+
             size_t numOtherPlayers = event.packet->dataLength / sizeof(Network_player) - 1;
 
             Network_player network_player;

@@ -19,8 +19,16 @@ ON CLIENT INPUT:
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <thread>
+#include <atomic>
 
 int maxUsername = 16;
+
+// Where we log server messages
+std::vector<std::string> errors;
+std::vector<std::string> connections;
+
+std::atomic<bool> running(true);
 
 // Used for sending data over the network
 struct Network_player {
@@ -127,6 +135,66 @@ std::string getRandomName(std::vector<std::string>& randNames, int& numNames){
     return result;
 }
 
+// Where we parse inputs from the server owner
+/*
+print errors -> prints the logged errors
+print connections -> prints the logged connections
+shutdown -> shuts down the server
+*/
+
+void readInput(){
+
+    // Helper functions
+    // If the current character is a white space, it goes until it finds a letter and returns that index
+    auto skipWhiteSpaces = [](std::string str, int idx) -> int {
+        while (str[idx] == ' ') idx++;
+
+        return idx;
+    };
+
+    // Keep going until we see a whitespace
+    auto findNextWhiteSpace = [](std::string str, int idx) -> int {
+        while (str[idx] != ' ') idx++;
+
+        return idx;
+    };
+
+    while (running){
+        std::string input;
+        std::getline(std::cin, input);
+
+        // Parse the first word
+        int startWord = skipWhiteSpaces(input, 0);
+        int endWord = findNextWhiteSpace(input, startWord);
+
+        std::string firstWord = input.substr(startWord, endWord - startWord);
+        if (firstWord == "print"){
+            // Parse the second word
+            int startWord2 = skipWhiteSpaces(input, endWord);
+            int endWord2 = findNextWhiteSpace(input, startWord2);
+
+            std::string secondWord = input.substr(startWord2, endWord2 - startWord2);
+            
+            if (secondWord == "error"){
+                for (const auto& str : errors) std::cout << str;
+            }
+            else if (secondWord == "connections"){
+                for (const auto& str : connections) std::cout << str;
+            }
+        }
+        else if (firstWord == "shutdown"){
+            running = false;
+            break;
+        }
+        else {
+            std::cout << "Invalid command.\n";
+        }
+    }
+
+    // Flush the std::getline
+    std::cout << std::endl;
+}
+
 int main(int argc, char* argv[]){
 
     if (enet_initialize() < 0){
@@ -157,7 +225,7 @@ int main(int argc, char* argv[]){
 
     std::string fileName;
     std::cout << "Enter a filename: \n";
-    std::cin >> fileName;
+    std::getline(std::cin, fileName);
 
     if (!readMapData("maps/" + fileName, flattenedMap, sprites, mapWidth, mapHeight, numSprites)) return 0;
 
@@ -175,22 +243,24 @@ int main(int argc, char* argv[]){
     std::vector<Network_player> players;
 
     ENetEvent event;
-    while (true){
-        while (enet_host_service(server, &event, 1000) > 0){
+
+    std::thread inputThread(readInput);
+    while (running){
+        while (enet_host_service(server, &event, 10) > 0){
             switch (event.type){
                 case ENET_EVENT_TYPE_CONNECT: {
                     // Give him an username
                     std::string username = getRandomName(randNames, numNames);
 
                     if (username.size() > maxUsername){
-                        std::cout << username << ": Username can't be longer than " << maxUsername <<  " characters.\n";
+                        errors.push_back(username + ": Username can't be longer than " + std::to_string(maxUsername) +  " characters.\n");
                         enet_peer_reset(event.peer); break;
                     }
 
                     // Give him an ID
                     int playerID = findAvailableID(availableIDs);
                     if (playerID == -1){
-                        std::cout << "Too many players, can't assign ID to " << username << ".\n";
+                        errors.push_back("Too many players, can't assign ID to " + username + ".\n");
                         enet_peer_reset(event.peer); break;
                     }
                     availableIDs[playerID] = false;
@@ -200,7 +270,7 @@ int main(int argc, char* argv[]){
                     newPlayer.playerID = playerID;
                     players.push_back(newPlayer);
                     numPlayers++;
-                    std::cout << username << " connected to the server. " << numPlayers << " player(s) online." << std::endl;
+                    connections.push_back(username + " connected to the server. " + std::to_string(numPlayers) + " player(s) online.\n");
 
                     // Store safe client data
                     event.peer->data = new ClientData{static_cast<uint32_t>(playerID), username};
@@ -271,7 +341,7 @@ int main(int argc, char* argv[]){
                 case ENET_EVENT_TYPE_DISCONNECT: {
                     numPlayers--;
                     std::string username = static_cast<ClientData*>(event.peer->data)->username;
-                    std::cout << username << " disconnected from the server. " << numPlayers << " player(s) online.\n";
+                    connections.push_back(username + " disconnected from the server. " + std::to_string(numPlayers) + " player(s) online.\n");
                     if (event.peer->data) {
                         // Free the ID and username for later usage by other clients
                         int playerID = static_cast<ClientData*>(event.peer->data)->playerID;
@@ -295,6 +365,20 @@ int main(int argc, char* argv[]){
                 }
             }
         }
+    }
+
+    inputThread.join();
+
+    std::cout << "Destroying the server." << std::endl;
+
+    // Broadcast a disconnect message
+    ENetPacket* packet = enet_packet_create(nullptr, 0, ENET_PACKET_FLAG_RELIABLE);
+    enet_host_broadcast(server, 0, packet);
+    enet_host_flush(server);
+
+    uint32_t start = SDL_GetTicks();
+    while (SDL_GetTicks() - start < 1000) {
+        enet_host_service(server, &event, 0);
     }
 
     enet_host_destroy(server);

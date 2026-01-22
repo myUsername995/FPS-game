@@ -828,15 +828,6 @@ int main(int argc, char* argv[]){
 
         SDL_FRect rect = GPURenderText(arial.normal, "FPS: " + std::to_string(FPS), {10, 10}, {255, 255, 255, 255});
 
-        rect.y += rect.h + 10;
-        rect = GPURenderText(arial.normal, "Speed: " + std::to_string(playerSpeed), {rect.x, rect.y}, {255, 255, 255, 255});
-
-        rect.y += rect.h + 10;
-        rect = GPURenderText(arial.normal, "Ping: " + std::to_string(state.player.ping), {rect.x, rect.y}, {255, 255, 255, 255});
-
-        rect.y += rect.h + 10;
-        rect = GPURenderText(arial.normal, "Health: " + std::to_string(state.player.health), {rect.x, rect.y}, {255, 255, 255, 255});
-
         std::string pUsername = "";
         if (playerHit){
             pUsername = playerHit->username;
