@@ -250,14 +250,15 @@ int main(int argc, char* argv[]){
                 case ENET_EVENT_TYPE_RECEIVE: {
                     // Assume the client sent their player information
                     if (event.packet->dataLength != sizeof(Network_player)) break;
+                    Network_player curPlayer;
+                    memcpy(&curPlayer, event.packet->data, sizeof(Network_player));
 
-                    int playerID = static_cast<ClientData*>(event.peer->data)->playerID;
+                    // The player we have to change isn't necessary the player the event.peer client has, so calculate it
+                    int playerID = curPlayer.playerID;
                     int index = findPlayerID(players, playerID);
                     if (index == -1) break;
 
-                    Network_player temp;
-                    memcpy(&temp, event.packet->data, sizeof(Network_player));
-                    players[index] = temp;
+                    players[index] = curPlayer;
 
                     // Broadcast to all clients
                     ENetPacket* packet = enet_packet_create(players.data(), players.size() * sizeof(Network_player), ENET_PACKET_FLAG_RELIABLE);

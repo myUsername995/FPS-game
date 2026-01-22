@@ -465,8 +465,8 @@ void renderPlayerNames(const std::string& fontName, const gameState& state){
     deleteFont(tempFont);
 }
 
-// Calculate which player was hit, how much damage was dealt, then advance the shooting animation and resolve health changes
-void resolveShot(gameState& state){
+// Calculate which player was hit, damage them, and return the player
+Player* resolveShot(gameState& state){
     // The closest player to us gets shot (even if there are multiple hits)
     double closestHit = INFINITY;
     int hitIndex = -1;
@@ -493,15 +493,15 @@ void resolveShot(gameState& state){
     }
 
     // No player was hit 
-    if (hitIndex == -1) return;
+    if (hitIndex == -1) return NULL;
 
     // Change the other player's health
     float damageDealt = guns[state.player.gunType].damage;
-    Player& hitPlayer = state.otherPlayers[hitIndex];
+    Player* hitPlayer = &state.otherPlayers[hitIndex];
 
-    hitPlayer.health -= damageDealt;
+    hitPlayer->health -= damageDealt;
 
-    std::cout << hitPlayer.username << std::endl;
+    return hitPlayer;
 }
 
 int main(int argc, char* argv[]){
@@ -530,7 +530,7 @@ int main(int argc, char* argv[]){
     cubeToLines(state);
     
     // On connection, send our player info immediately to the other clients
-    connection.sendData(state);
+    connection.sendData(state.player, state.player.playerID);
 
     // Wall textures
     loadImage(TEXTURE_WALL, "eagle.png", 0);
@@ -738,14 +738,21 @@ int main(int argc, char* argv[]){
         );
 
         // Shooting with a gun
+        Player* playerHit = NULL;
         if (canShoot){
             state.player.fired = true;
 
             gunShootAccumulate = 0;
             gunAnimationAccumulate = 0;
 
-            resolveShot(state);
+            playerHit = resolveShot(state);
+
+            if (playerHit){
+                // Send this player data to the server (which will send it to the client so he can realise he's been shot)
+                connection.sendData(*playerHit, playerHit->playerID);
+            }
         }
+
         // Render the shooting animation (own player's view)
         if (state.player.fired && gunAnimationAccumulate >= guns[state.player.gunType].shootSpeed / 4){
             gunAnimationAccumulate = 0;
@@ -792,7 +799,9 @@ int main(int argc, char* argv[]){
         float height = state.map[0].size();
 
         pingTime.begin();
-        connection.sendData(state);
+
+        // Send our own player data every frame
+        connection.sendData(state.player, state.player.playerID);
 
         // Receive data right before rendering so that we get the most up to date data
         if (connection.receiveData(state)){
@@ -821,6 +830,14 @@ int main(int argc, char* argv[]){
 
         rect.y += rect.h + 10;
         rect = GPURenderText(arial.normal, "Health: " + std::to_string(state.player.health), {rect.x, rect.y}, {255, 255, 255, 255});
+
+        std::string pUsername = "";
+        if (playerHit){
+            pUsername = playerHit->username;
+        }
+
+        rect.y += rect.h + 10;
+        rect = GPURenderText(arial.normal, "Hit: " + pUsername, {rect.x, rect.y}, {255, 255, 255, 255});
 
         SDL_GL_SwapWindow(window);
 

@@ -19,5 +19,5 @@ class Client {
     bool connectToServer(gameState& state, std::string serverIP);
     void disconnectFromServer();
     bool receiveData(gameState& state);
-    void sendData(gameState& state);
+    void sendData(const Player& player, int playerID);
 };

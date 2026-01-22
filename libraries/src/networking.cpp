@@ -291,21 +291,22 @@ bool Client::receiveData(gameState& state){
     return received;
 }
 
-void Client::sendData(gameState& state){
+// Send's one player struct of data to the server, and give the server and ID to let it know which player's data to modify
+void Client::sendData(const Player& player, int playerID){
     // Create a struct instead of a class
     Network_player p;
-    p.lookDirX = state.player.lookDir.x;
-    p.lookDirY = state.player.lookDir.y;
-    p.playerID = state.player.playerID;
-    std::strncpy(p.username, state.player.username.c_str(), sizeof(p.username) - 1);
+    p.lookDirX = player.lookDir.x;
+    p.lookDirY = player.lookDir.y;
+    p.playerID = playerID;
+    std::strncpy(p.username, player.username.c_str(), sizeof(p.username) - 1);
     p.username[sizeof(p.username) - 1] = '\0';
-    p.posX = state.player.pos.x;
-    p.posY = state.player.pos.y;
-    p.isMoving = state.player.isMoving;
-    p.animationStep = state.player.animationStep;
-    p.ping = state.player.ping;
-    p.health = state.player.health;
-    p.gunFrame = state.player.gunFrame;
+    p.posX = player.pos.x;
+    p.posY = player.pos.y;
+    p.isMoving = player.isMoving;
+    p.animationStep = player.animationStep;
+    p.ping = player.ping;
+    p.health = player.health;
+    p.gunFrame = player.gunFrame;
 
     ENetPacket* packet = enet_packet_create(&p, sizeof(p), ENET_PACKET_FLAG_RELIABLE);
 
