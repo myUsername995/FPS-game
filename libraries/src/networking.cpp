@@ -3,6 +3,20 @@
 #include <cassert>
 #include <cstring>
 
+enum PacketType {
+    // Sent during gameplay
+    PACKET_KICK,
+    PACKET_SHUTDOWN,
+    PACKET_DATA,
+    
+    // Sent on initialisation
+    PACKET_PLAYER_METADATA,
+    PACKET_MAP_METADATA,
+    PACKET_MAP_DATA,
+    PACKET_SPRITES_METADATA,
+    PACKET_SPRITES_DATA
+};
+
 // Used for sending data over the network
 struct Network_player {
     // Metadata
@@ -29,7 +43,6 @@ struct Network_player {
 static_assert(std::is_trivially_copyable_v<Network_player>);
 static_assert(sizeof(Network_player) == 72);
 
-// The number of none player sprites
 bool Client::connectToServer(gameState& state, std::string serverIP){
     Client::client = enet_host_create(NULL, 1, 2, 0, 0);
     if (Client::client == NULL){
@@ -50,14 +63,18 @@ bool Client::connectToServer(gameState& state, std::string serverIP){
 
     std::cout << "Connecting to " << serverIP << "..." << std::endl;
 
-    // Try to connect for 5 seconds
+    // Try to connect for 3 seconds
     bool connected = false;
-    while (enet_host_service(Client::client, &event, 5000) > 0){
-        if (event.type == ENET_EVENT_TYPE_CONNECT){
-            std::cerr << "Succesfully connected to the server.\n";
+    int elapsed = 0;
+    int timeout = 3000;
+    while (elapsed < timeout) {
+        int serviceResult = enet_host_service(Client::client, &event, 100);
+        if (serviceResult > 0 && event.type == ENET_EVENT_TYPE_CONNECT) {
+            std::cout << "Successfully connected to the server.\n";
             connected = true;
+            break;
         }
-        break;
+        elapsed += 100;
     }
 
     if (!connected){
@@ -66,51 +83,76 @@ bool Client::connectToServer(gameState& state, std::string serverIP){
         return false;
     }
 
-    // Wait to receive the packets:
-    // 1. playerID, 2. map dimensions, 3. map data 4. sprites length 5. sprites data
+    // Wait to receive the packets
+    bool receivedPlayerMetadata = false;
+    bool receivedMapMetadata = false;
+    bool receivedMapData = false;
+    bool receivedSpritesMetadata = false;
+    bool receivedSpritesData = false;
 
-    int numPacketsReceived = 0;
-    while (numPacketsReceived < 5){
-        bool receivedPacket = false;
-        while (enet_host_service(Client::client, &event, 5000) > 0){
-            if (event.type == ENET_EVENT_TYPE_RECEIVE){
-                receivedPacket = true;
+    bool receivedAll = false;
 
-                // Set the playerID
-                if (numPacketsReceived == 0){
+    timeout = 5000;
+    elapsed = 0;
+    while (elapsed < timeout){
+        int receivedPacket = enet_host_service(client, &event, 100);
+        elapsed += 100;
+
+        receivedAll = receivedPlayerMetadata && receivedMapMetadata && receivedMapData && receivedSpritesMetadata && receivedSpritesData;
+        if (receivedAll) break;
+        if (!receivedPacket) continue;
+
+        if (event.type == ENET_EVENT_TYPE_RECEIVE){
+            // The buffer of bytes we receive from the network
+            std::vector<uint8_t> buffer(event.packet->dataLength);
+            memcpy(buffer.data(), event.packet->data, event.packet->dataLength);
+
+            // The type
+            PacketType type = static_cast<PacketType>(buffer[0]);
+
+            // The data
+            std::vector<uint8_t> data;
+            data.resize(buffer.size()-1);
+            memcpy(data.data(), buffer.data() + 1, buffer.size());
+
+            // Handle each kind of data differently
+            switch (type){
+                case PACKET_PLAYER_METADATA: {
+                    receivedPlayerMetadata = true;
                     struct playerMetaData {
                         uint32_t playerID;
                         char username[32];
                     };
 
                     playerMetaData received;
-                    memcpy(&received, event.packet->data, event.packet->dataLength);
+                    memcpy(&received, data.data(), data.size());
 
                     state.player.playerID = received.playerID;
                     state.player.username = received.username;
+                    break;
                 }
-                // Dimensions
-                else if (numPacketsReceived == 1){
+                case PACKET_MAP_METADATA: {
+                    receivedMapMetadata = true;
                     struct Dimensions {
                         int width, height;
                     };
 
                     Dimensions dims;
-                    memcpy(&dims, event.packet->data, event.packet->dataLength);
+                    memcpy(&dims, data.data(), data.size());
 
                     state.map.resize(dims.width);
                     for (int i = 0; i < dims.width; i++){
                         state.map[i].resize(dims.height);
                     }
+                    break;
                 }
-                // Map data
-                else if (numPacketsReceived == 2){
+                case PACKET_MAP_DATA: {
+                    receivedMapData = true;
                     int width = state.map.size();
                     int height = state.map[0].size();
 
                     std::vector<int> arr(width * height);
-
-                    memcpy(arr.data(), event.packet->data, event.packet->dataLength);
+                    memcpy(arr.data(), data.data(), data.size());
 
                     for (int i = 0; i < width * height; i++){
                         int x = i / width;
@@ -118,61 +160,68 @@ bool Client::connectToServer(gameState& state, std::string serverIP){
 
                         state.map[x][y] = arr[i];
                     }
+                    break;
                 }
-                // Sprites metadata
-                else if (numPacketsReceived == 3){
+                case PACKET_SPRITES_METADATA: {
+                    receivedSpritesMetadata = true;
                     int numSprites;
-                    memcpy(&numSprites, event.packet->data, event.packet->dataLength);
+                    memcpy(&numSprites, data.data(), data.size());
 
                     state.numSprites = numSprites;
                     state.fullNumSprites = numSprites;
                     state.sprites.resize(numSprites);
+                    break;
                 }
-                // Sprites data
-                else if (numPacketsReceived == 4){
+                case PACKET_SPRITES_DATA: {
+                    receivedSpritesData = true;
                     struct network_sprite {
                         float x, y;
                         int texture;
                     };
 
                     std::vector<network_sprite> network_sprites(state.sprites.size());
-                    memcpy(network_sprites.data(), event.packet->data, event.packet->dataLength);
+                    memcpy(network_sprites.data(), data.data(), data.size());
 
                     for (int i = 0; i < state.sprites.size(); i++){
                         state.sprites[i].pos = {network_sprites[i].x, network_sprites[i].y};
                         state.sprites[i].texture = network_sprites[i].texture;
                         state.sprites[i].isPlayer = false;
                     }
+                    break;
                 }
-
-                enet_packet_destroy(event.packet);
-
-                numPacketsReceived++;
-                break;
             }
-        }
 
-        if (!receivedPacket && numPacketsReceived == 0){
-            std::cerr << "Didn't receive the playerID from the server.\n";
+            enet_packet_destroy(event.packet);
+    }
+    }
+
+    // Show which packets we didn't receive
+    if (!receivedAll){
+        std::cout << "Connection timed out.\n";
+
+        if (!receivedPlayerMetadata){
+            std::cerr << "Didn't receive the player metadata from the server.\n";
             return false;
         }
-        if (!receivedPacket && numPacketsReceived == 1){
+        if (!receivedMapMetadata){
             std::cerr << "Didn't receive the map dimensions from the server.\n";
             return false;
         }
-        if (!receivedPacket && numPacketsReceived == 2){
+        if (!receivedMapData){
             std::cerr << "Didn't receive the map data from the server.\n";
             return false;
         }
-        if (!receivedPacket && numPacketsReceived == 3){
+        if (!receivedSpritesMetadata){
             std::cerr << "Didn't receive the sprites length data from the server.\n";
             return false;
         }
-        if (!receivedPacket && numPacketsReceived == 4){
+        if (!receivedSpritesData){
             std::cerr << "Didn't receive the sprites data from the server.\n";
             return false;
         }
     }
+    
+    std::cout << "Received all initialisation packets.\n";
 
     return true;
 }
@@ -202,95 +251,113 @@ void Client::disconnectFromServer(){
     std::cout << "Disconnected from the server.\n";
 }
 
-// Returns whether data was received or not
-bool Client::receiveData(gameState& state){
-    bool received = false;
+// Receives data from the server
+void Client::receiveData(gameState& state, bool& received, bool& shutdown, bool& kicked, bool& corruptedData){
+    shutdown = false;
+    kicked = false;
+    corruptedData = false;
+    received = false;
+
     ENetEvent event;
     while (enet_host_service(Client::client, &event, 0) > 0){
-        received = true;
         if (event.type == ENET_EVENT_TYPE_RECEIVE){
-            // Check if a disconnect message was sent (0 length packet)
-            if (event.packet->dataLength == 0){
-                std::cout << "The server shut down.\n";
+            received = true;
 
-                exit(0);
-            }
+            // Read the data sent by the server
+            std::vector<uint8_t> buffer(event.packet->dataLength);
+            memcpy(buffer.data(), event.packet->data, event.packet->dataLength);
 
-            size_t numOtherPlayers = event.packet->dataLength / sizeof(Network_player) - 1;
+            // Type information must exist in all packets, so its safe to read
+            PacketType type = static_cast<PacketType>(buffer[0]);
+            switch (type){
+                case PACKET_SHUTDOWN: {
+                    std::cout << "The server shut down.\n";
+                    enet_packet_destroy(event.packet);
 
-            Network_player network_player;
-            std::vector<Network_player> network_otherPlayers(numOtherPlayers);
-            
-            std::vector<Network_player> network_allPlayers;
-            network_allPlayers.resize(numOtherPlayers+1); // allocate space
-            if ((numOtherPlayers + 1) * sizeof(Network_player) != event.packet->dataLength){
-                std::cout << "Network data was sent wrongly.\n";
-                enet_packet_destroy(event.packet);
-                return false;
-            }
-            memcpy(network_allPlayers.data(), event.packet->data, event.packet->dataLength);
-
-            // Remove our own player from the array so it only contains other players
-            int removeIndex = -1;
-            for (size_t i = 0; i < numOtherPlayers + 1; i++){
-                if (network_allPlayers[i].playerID == state.player.playerID){
-                    network_player = network_allPlayers[i];
-                    removeIndex = i;
-                    break;
+                    shutdown = true;
+                    return;
                 }
-            }
+                case PACKET_KICK: {
+                    std::cout << "You've been kicked from the server.\n";
+                    enet_packet_destroy(event.packet);
 
-            if (removeIndex == -1){
-                std::cout << "Player was not sent from the server.\n";
-                enet_packet_destroy(event.packet);
-                return false;
-            }
+                    kicked = true;
+                    return;
+                }
+                case PACKET_DATA: {
+                    // Read player data into our vector
+                    int numPlayers = (buffer.size()-1) / sizeof(Network_player);
+                    std::vector<Network_player> network_allPlayers(numPlayers);
+                    memcpy(network_allPlayers.data(), buffer.data() + 1, buffer.size()-1);
 
-            network_allPlayers.erase(network_allPlayers.begin() + removeIndex);
-            network_otherPlayers = network_allPlayers;
+                    // Organise player data
+                    int numOtherPlayers = numPlayers - 1;
+                    Network_player network_player;
+                    std::vector<Network_player> network_otherPlayers(numOtherPlayers);
 
-            auto copyNetworkStruct = [](Player& p, const Network_player& netP){
-                p.camera = {0, 0}; // Camera doesn't matter for other players
-                p.lookDir = {netP.lookDirX, netP.lookDirY};
-                p.playerID = netP.playerID;
-                p.username = netP.username;
-                p.pos.x = netP.posX;
-                p.pos.y = netP.posY;
-                p.isMoving = (netP.isMoving == 1);
-                p.animationStep = netP.animationStep;
-                p.ping = netP.ping;
-                p.health = netP.health;
-                p.gunFrame = netP.gunFrame;
-            };
+                    // Remove our own player from the array so it only contains other players
+                    int removeIndex = -1;
+                    for (size_t i = 0; i < network_allPlayers.size(); i++){
+                        if (network_allPlayers[i].playerID == state.player.playerID){
+                            network_player = network_allPlayers[i];
+                            removeIndex = i;
+                            break;
+                        }
+                    }
 
-            // Only copy the health for the player
-            state.player.health = network_player.health;
+                    if (removeIndex == -1){
+                        std::cout << "Player was not sent from the server.\n";
+                        enet_packet_destroy(event.packet);
 
-            state.otherPlayers.resize(numOtherPlayers);
-            // Copy into the actual otherPlayers array
-            for (int i = 0; i < numOtherPlayers; i++){
-                copyNetworkStruct(state.otherPlayers[i], network_otherPlayers[i]);
-            }
+                        corruptedData = true;
+                        return;
+                    }
 
-            state.numPlayers = numOtherPlayers;
-            state.fullNumSprites = state.numSprites + state.numPlayers;
-            state.sprites.resize(state.fullNumSprites);
-            // Add sprites for the other players (not for ourselves, as we don't see our own sprite)
-            for (int i = 0; i < numOtherPlayers; i++){
-                Sprite newSprite;
-                newSprite.texture = 0;
-                newSprite.pos = state.otherPlayers[i].pos;
-                newSprite.index = i;
-                newSprite.isPlayer = true;
+                    network_allPlayers.erase(network_allPlayers.begin() + removeIndex);
+                    network_otherPlayers = network_allPlayers;
 
-                state.sprites[state.numSprites + i] = newSprite;
+                    auto copyNetworkStruct = [](Player& p, const Network_player& netP){
+                        p.camera = {0, 0}; // Camera doesn't matter for other players
+                        p.lookDir = {netP.lookDirX, netP.lookDirY};
+                        p.playerID = netP.playerID;
+                        p.username = netP.username;
+                        p.pos.x = netP.posX;
+                        p.pos.y = netP.posY;
+                        p.isMoving = (netP.isMoving == 1);
+                        p.animationStep = netP.animationStep;
+                        p.ping = netP.ping;
+                        p.health = netP.health;
+                        p.gunFrame = netP.gunFrame;
+                    };
+
+                    // Only copy the health for the player
+                    state.player.health = network_player.health;
+
+                    state.otherPlayers.resize(numOtherPlayers);
+                    // Copy into the actual otherPlayers array
+                    for (int i = 0; i < numOtherPlayers; i++){
+                        copyNetworkStruct(state.otherPlayers[i], network_otherPlayers[i]);
+                    }
+
+                    state.numPlayers = numOtherPlayers;
+                    state.fullNumSprites = state.numSprites + state.numPlayers;
+                    state.sprites.resize(state.fullNumSprites);
+                    // Add sprites for the other players (not for ourselves, as we don't see our own sprite)
+                    for (int i = 0; i < numOtherPlayers; i++){
+                        Sprite newSprite;
+                        newSprite.texture = 0;
+                        newSprite.pos = state.otherPlayers[i].pos;
+                        newSprite.index = i;
+                        newSprite.isPlayer = true;
+
+                        state.sprites[state.numSprites + i] = newSprite;
+                    }
+                }
             }
 
             enet_packet_destroy(event.packet);
         }
     }
-
-    return received;
 }
 
 // Send's one player struct of data to the server, and give the server and ID to let it know which player's data to modify

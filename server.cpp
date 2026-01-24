@@ -6,8 +6,15 @@ ON CLIENT CONNECTING:
 -Send clients data (if any)
 
 ON CLIENT INPUT:
--Inputs are resolved client-side
--New positions are sent to the server, synchronise with other clients
+-Change our server data
+-Send the unchanged data to other clients
+-WARNING: No validation is performed for data sent by clients, other than length validation. (cuz hell yeh)
+
+Commands:
+print (LOGTYPE) -> prints the logs
+shutdown -> sends shutdown packets to clients, and destroy's the server
+kick (USERNAME) -> kicks an user.
+
 */
 
 #include <SDL3/SDL.h>
@@ -19,16 +26,33 @@ ON CLIENT INPUT:
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <sstream>
+#include <conio.h>
+#include <algorithm>
 #include <thread>
-#include <atomic>
+
+bool run = true;
 
 int maxUsername = 16;
 
 // Where we log server messages
-std::vector<std::string> errors;
-std::vector<std::string> connections;
+std::ostringstream errors;
+std::ostringstream connections;
+int numPlayers = 0;
 
-std::atomic<bool> running(true);
+enum PacketType {
+    // Sent during gameplay
+    PACKET_KICK,
+    PACKET_SHUTDOWN,
+    PACKET_DATA,
+    
+    // Sent on initialisation
+    PACKET_PLAYER_METADATA,
+    PACKET_MAP_METADATA,
+    PACKET_MAP_DATA,
+    PACKET_SPRITES_METADATA,
+    PACKET_SPRITES_DATA
+};
 
 // Used for sending data over the network
 struct Network_player {
@@ -52,18 +76,33 @@ struct Network_player {
     int8_t health;
     int8_t gunFrame;
 };
-
 static_assert(sizeof(Network_player) == 72);
+
+// These two arrays are synchronised, but they server different purposes
+std::vector<Network_player> players;
+std::vector<ENetPeer*> peerData;
 
 struct ClientData {
     uint32_t playerID;
     std::string username;
+    std::string ip;
+    uint32_t port;
 };
 
 struct sprite {
     float x, y;
     int texture;
 };
+
+// Append the type information to the front of the packet, length must be specified in bytes
+std::vector<uint8_t> convertData(PacketType type, void* ptr, size_t length){
+    std::vector<uint8_t> buffer(1 + length);
+
+    buffer[0] = static_cast<uint8_t>(type);
+    memcpy(buffer.data() + 1, ptr, length);
+
+    return buffer;
+}
 
 bool readMapData(std::string fileName, std::vector<int>& worldMap, std::vector<sprite>& sprites, uint32_t& width, uint32_t& height, 
                  uint32_t& numSprites){
@@ -109,9 +148,21 @@ int findAvailableID(std::array<bool, 100>& IDs){
 }
 
 // Return the index into the players array, based on a playerID
-int findPlayerID(const std::vector<Network_player>& players, int id){
+int findPlayerID(int id){
     for (uint32_t i = 0; i < players.size(); i++){
         if (players[i].playerID == id){
+            return i;
+        }
+    }
+
+    // Couldn't find the player
+    return -1;
+}
+
+// Return the index into the players array, based on an username
+int findPlayerUsername(const std::string& username){
+    for (uint32_t i = 0; i < players.size(); i++){
+        if (players[i].username == username){
             return i;
         }
     }
@@ -135,68 +186,181 @@ std::string getRandomName(std::vector<std::string>& randNames, int& numNames){
     return result;
 }
 
-// Where we parse inputs from the server owner
-/*
-print errors -> prints the logged errors
-print connections -> prints the logged connections
-shutdown -> shuts down the server
-*/
+// Helper functions
+// If the current character is a white space, it goes until it finds a letter and returns that index
+int skipWhiteSpaces(std::string str, int idx){
+    while (idx < str.size() && str[idx] == ' ') idx++;
 
-void readInput(){
+    return idx;
+}
 
-    // Helper functions
-    // If the current character is a white space, it goes until it finds a letter and returns that index
-    auto skipWhiteSpaces = [](std::string str, int idx) -> int {
-        while (str[idx] == ' ') idx++;
+// Keep going until we see a whitespace
+int findNextWhiteSpace(std::string str, int idx){
+    while (idx < str.size() && str[idx] != ' ') idx++;
 
-        return idx;
-    };
+    return idx;
+}
 
-    // Keep going until we see a whitespace
-    auto findNextWhiteSpace = [](std::string str, int idx) -> int {
-        while (str[idx] != ' ') idx++;
+#include <windows.h>
 
-        return idx;
-    };
+int getConsoleWidth() {
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
+    return csbi.srWindow.Right - csbi.srWindow.Left + 1;
+}
 
-    while (running){
-        std::string input;
-        std::getline(std::cin, input);
+// Str -> the string to center; fillStr -> a single character to fill the empty spaces
+void centerText(const std::string& str, const std::string& fillStr){
+    int width = getConsoleWidth();
+    int padding = (width - str.size()) / 2;
+    if (padding < 0) padding = 0;
 
-        // Parse the first word
-        int startWord = skipWhiteSpaces(input, 0);
-        int endWord = findNextWhiteSpace(input, startWord);
+    std::cout << std::string(padding, fillStr[0]) << str << std::string(padding, fillStr[0]) << "\n";
+}
 
-        std::string firstWord = input.substr(startWord, endWord - startWord);
-        if (firstWord == "print"){
-            // Parse the second word
-            int startWord2 = skipWhiteSpaces(input, endWord);
-            int endWord2 = findNextWhiteSpace(input, startWord2);
+// Parses a word starting at some index "idx" in the string "input", returns the next word, and writes the index of the end of that word 
+// into "idx"
+std::string parseWord(const std::string& input, int& idx, bool toLower){
+    // Parse the first word
+    int startWord = skipWhiteSpaces(input, idx);
 
-            std::string secondWord = input.substr(startWord2, endWord2 - startWord2);
-            
-            if (secondWord == "error"){
-                for (const auto& str : errors) std::cout << str;
-            }
-            else if (secondWord == "connections"){
-                for (const auto& str : connections) std::cout << str;
-            }
-        }
-        else if (firstWord == "shutdown"){
-            running = false;
-            break;
-        }
-        else {
-            std::cout << "Invalid command.\n";
+    // Check if there's any non-space character
+    if (startWord >= input.size()) {
+        return "";
+    }
+
+    int endWord = findNextWhiteSpace(input, startWord);
+    int length = endWord - startWord;
+
+    // Make sure length is positive
+    if (length <= 0) {
+        return "";
+    }
+
+    idx = endWord;
+
+    std::string word = input.substr(startWord, length);
+
+    if (toLower) std::transform(word.begin(), word.end(), word.begin(), ::tolower);
+
+    return word;
+}
+
+// Parses a command into words
+void parseWords(const std::string& input, std::vector<std::string>& outWords, int wordsToParse){
+    int idx = 0;
+    int numWords = 0;
+    while (idx < input.size() && numWords < wordsToParse){
+        std::string word = parseWord(input, idx, true);
+        if (word == "") return;
+
+        outWords.push_back(word);
+    }
+}
+
+// Kick a player based on an username
+void kickPlayer(ENetHost* server, const std::string& username){
+    std::cout << "Kicking player: " << username << "...\n";
+    int index = findPlayerUsername(username);
+    if (index == -1){
+        std::cout << "No player named " << username << ".\n";
+        return;
+    }
+
+    // Send a kick packet to this player
+    std::vector<uint8_t> buffer = convertData(PACKET_KICK, nullptr, 0);
+    ENetPeer* playerToKick = peerData[index];
+    ClientData* playerData = static_cast<ClientData*>(playerToKick->data);
+
+    // Send the disconnect packet to the client
+    ENetPacket* kickPacket = enet_packet_create(buffer.data(), buffer.size(), ENET_PACKET_FLAG_RELIABLE);
+    enet_peer_send(playerToKick, 0, kickPacket);
+    enet_host_flush(server);
+
+    numPlayers--;
+    connections << "Type: (kicked), ";
+    connections << "Username: (" << username << "), ";
+    connections << "IP Address: (" << playerData->ip << ":" << playerData->port << "), ";
+    connections << "Number of players: (" << numPlayers << ")\n";
+    enet_peer_reset(playerToKick);
+}
+
+template<typename... Args>
+bool matchInput(const std::vector<std::string>& words, Args... args){
+    constexpr int numArguements = sizeof...(args);
+    // Not enough words
+    if (words.size() < numArguements){
+        return false;
+    }
+
+    std::string arr[numArguements] = {args...};
+
+    for (int i = 0; i < numArguements; i++){
+        if (words[i] != arr[i]){
+            return false;
         }
     }
 
-    // Flush the std::getline
-    std::cout << std::endl;
+    return true;
+}
+
+void parseInput(ENetHost* server, const std::string& input){
+    // Parse the command
+    std::vector<std::string> words;
+    parseWords(input, words, 3);
+
+    if (matchInput(words, "shutdown")){
+        run = false;
+    }
+    else if (matchInput(words, "print", "errors")){
+        centerText("ERRORS", "=");
+        std::cout << errors.str();
+    }
+    else if (matchInput(words, "print", "connections")){
+        centerText("CONNECTIONS", "=");
+        std::cout << connections.str();
+    }
+    else if (matchInput(words, "kick")){
+        // See which username was typed in
+        int idx = 0;
+        parseWord(input, idx, true); // parse the "kick" command but discard the result
+        std::string username = parseWord(input, idx, true); // parse the username
+
+        kickPlayer(server, username);
+    }
+    else {
+        std::cout << "Invalid command.\n";
+    }
+
+    std::cout << "\n";
+}
+
+void readInput(ENetHost* server, std::string& input){
+    if (_kbhit()){
+        char c = _getch();
+
+        // Backspace
+        if (c == '\b'){
+            if (!input.empty()) input.pop_back();
+
+            std::cout << "\b \b";
+        }
+        // Enter
+        else if (c == '\r'){
+            std::cout << "\n";
+
+            parseInput(server, input);
+            input.clear();
+        }
+        else {
+            input += c;
+
+            std::cout << c;
+        }
+    }
 }
 
 int main(int argc, char* argv[]){
-
     if (enet_initialize() < 0){
         std::cerr << "Couldn't initialize enet!\n";
         return 0;
@@ -213,8 +377,6 @@ int main(int argc, char* argv[]){
         "jack_king_hoff",
         "dick_enbals"
     };
-
-    int numPlayers = 0;
 
     std::array<bool, 100> availableIDs;
     availableIDs.fill(true);
@@ -240,27 +402,27 @@ int main(int argc, char* argv[]){
         return 0;
     }
 
-    std::vector<Network_player> players;
-
+    std::string input;
+    SDL_Event SDLEvent;
     ENetEvent event;
-
-    std::thread inputThread(readInput);
-    while (running){
+    while (run){
+        readInput(server, input);
         while (enet_host_service(server, &event, 10) > 0){
+            readInput(server, input);
             switch (event.type){
                 case ENET_EVENT_TYPE_CONNECT: {
                     // Give him an username
                     std::string username = getRandomName(randNames, numNames);
 
                     if (username.size() > maxUsername){
-                        errors.push_back(username + ": Username can't be longer than " + std::to_string(maxUsername) +  " characters.\n");
+                        errors << username << ": Username can't be longer than " << maxUsername << " characters.\n";
                         enet_peer_reset(event.peer); break;
                     }
 
                     // Give him an ID
                     int playerID = findAvailableID(availableIDs);
                     if (playerID == -1){
-                        errors.push_back("Too many players, can't assign ID to " + username + ".\n");
+                        errors << "Too many players, can't assign ID to " << username << ".\n";
                         enet_peer_reset(event.peer); break;
                     }
                     availableIDs[playerID] = false;
@@ -269,11 +431,20 @@ int main(int argc, char* argv[]){
                     Network_player newPlayer{};
                     newPlayer.playerID = playerID;
                     players.push_back(newPlayer);
+                    peerData.push_back(event.peer);
                     numPlayers++;
-                    connections.push_back(username + " connected to the server. " + std::to_string(numPlayers) + " player(s) online.\n");
+
+                    char ip[32]; // for IPv4
+                    enet_address_get_host_ip(&event.peer->address, ip, sizeof(ip));
+                    uint32_t port = event.peer->address.port;
+
+                    connections << "Type: (connect), ";
+                    connections << "Username: (" << username << "), ";
+                    connections << "IP Address: (" << ip << ":" << port << "), ";
+                    connections << "Number of players: (" << numPlayers << ")\n";
 
                     // Store safe client data
-                    event.peer->data = new ClientData{static_cast<uint32_t>(playerID), username};
+                    event.peer->data = new ClientData{static_cast<uint32_t>(playerID), username, ip, port};
 
                     struct playerMetaData {
                         uint32_t playerID;
@@ -285,33 +456,26 @@ int main(int argc, char* argv[]){
                     strncpy(packet.username, username.c_str(), sizeof(packet.username) - 1);
                     packet.username[sizeof(packet.username)-1] = '\0';
 
-                    // Send ID and username back to the client
-                    ENetPacket* idPacket = enet_packet_create(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE);
-                    enet_peer_send(event.peer, 0, idPacket);
-
-                    // Send our map dimensions first
                     struct Dimensions {
                         int width, height;
                     };
+
                     Dimensions dims;
                     dims.width = mapWidth;
                     dims.height = mapHeight;
 
-                    ENetPacket* dimensionsPacket = enet_packet_create(&dims, sizeof(dims), ENET_PACKET_FLAG_RELIABLE);
-                    enet_peer_send(event.peer, 0, dimensionsPacket);
+                    ENetPeer* peer = event.peer;
+                    auto sendData = [peer](PacketType type, void* data, size_t length){
+                        std::vector<uint8_t> buffer = convertData(type, data, length);
+                        ENetPacket* sendPacket = enet_packet_create(buffer.data(), buffer.size(), ENET_PACKET_FLAG_RELIABLE);
+                        enet_peer_send(peer, 0, sendPacket);
+                    };
 
-                    // Send the map data to the client
-                    ENetPacket* mapPacket = enet_packet_create(flattenedMap.data(), mapWidth * mapHeight * sizeof(int), ENET_PACKET_FLAG_RELIABLE);
-                    enet_peer_send(event.peer, 0, mapPacket);
-
-                    // Send the sprites data
-                    // Length
-                    ENetPacket* spritesLength = enet_packet_create(&numSprites, sizeof(numSprites), ENET_PACKET_FLAG_RELIABLE);
-                    enet_peer_send(event.peer, 0, spritesLength);
-
-                    // Actual data
-                    ENetPacket* spritesPacket = enet_packet_create(sprites.data(), numSprites * sizeof(sprite), ENET_PACKET_FLAG_RELIABLE);
-                    enet_peer_send(event.peer, 0, spritesPacket);
+                    sendData(PACKET_PLAYER_METADATA, &packet, sizeof(packet));
+                    sendData(PACKET_MAP_METADATA, &dims, sizeof(dims));
+                    sendData(PACKET_MAP_DATA, flattenedMap.data(), mapWidth * mapHeight * sizeof(int));
+                    sendData(PACKET_SPRITES_METADATA, &numSprites, sizeof(numSprites));
+                    sendData(PACKET_SPRITES_DATA, sprites.data(), numSprites * sizeof(sprite));
 
                     enet_host_flush(server);
 
@@ -325,13 +489,17 @@ int main(int argc, char* argv[]){
 
                     // The player we have to change isn't necessary the player the event.peer client has, so calculate it
                     int playerID = curPlayer.playerID;
-                    int index = findPlayerID(players, playerID);
+                    int index = findPlayerID(playerID);
                     if (index == -1) break;
 
+                    // Store on the server side for easy access
                     players[index] = curPlayer;
 
+                    // Convert our data
+                    std::vector<uint8_t> buffer = convertData(PACKET_DATA, players.data(), players.size() * sizeof(Network_player));
+
                     // Broadcast to all clients
-                    ENetPacket* packet = enet_packet_create(players.data(), players.size() * sizeof(Network_player), ENET_PACKET_FLAG_RELIABLE);
+                    ENetPacket* packet = enet_packet_create(buffer.data(), buffer.size(), ENET_PACKET_FLAG_RELIABLE);
                     enet_host_broadcast(server, 0, packet);
                     enet_host_flush(server);
 
@@ -340,24 +508,33 @@ int main(int argc, char* argv[]){
                 }
                 case ENET_EVENT_TYPE_DISCONNECT: {
                     numPlayers--;
-                    std::string username = static_cast<ClientData*>(event.peer->data)->username;
-                    connections.push_back(username + " disconnected from the server. " + std::to_string(numPlayers) + " player(s) online.\n");
+                    ClientData* cData = static_cast<ClientData*>(event.peer->data);
+                    connections << "Type: (disconnect), ";
+                    connections << "Username: (" << cData->username << "), ";
+                    connections << "IP Address: (" << cData->ip << ":" << cData->port << "), ";
+                    connections << "Number of players: (" << numPlayers << ")\n";
+
                     if (event.peer->data) {
                         // Free the ID and username for later usage by other clients
-                        int playerID = static_cast<ClientData*>(event.peer->data)->playerID;
+                        int playerID = cData->playerID;
                         availableIDs[playerID] = true;
-                        randNames.push_back(username);
+                        randNames.push_back(cData->username);
 
                         // Erase the disconnected player from the array
-                        int index = findPlayerID(players, playerID);
-                        if (index != -1) players.erase(players.begin() + index);
+                        int index = findPlayerID(playerID);
+                        if (index != -1){
+                            players.erase(players.begin() + index);
+                            peerData.erase(peerData.begin() + index);
+                        }
 
                         delete static_cast<ClientData*>(event.peer->data);
                         event.peer->data = nullptr;
                     }
 
+                    std::vector<uint8_t> buffer = convertData(PACKET_DATA, players.data(), players.size() * sizeof(Network_player));
+
                     // Send the updated players array to every client so that they're immediately updated
-                    ENetPacket* packet = enet_packet_create(players.data(), players.size() * sizeof(Network_player), ENET_PACKET_FLAG_RELIABLE);
+                    ENetPacket* packet = enet_packet_create(buffer.data(), buffer.size(), ENET_PACKET_FLAG_RELIABLE);
                     enet_host_broadcast(server, 0, packet);
                     enet_host_flush(server);
                     
@@ -367,19 +544,14 @@ int main(int argc, char* argv[]){
         }
     }
 
-    inputThread.join();
-
     std::cout << "Destroying the server." << std::endl;
 
     // Broadcast a disconnect message
-    ENetPacket* packet = enet_packet_create(nullptr, 0, ENET_PACKET_FLAG_RELIABLE);
+    std::vector<uint8_t> shutdownMsg = convertData(PACKET_SHUTDOWN, nullptr, 0);
+
+    ENetPacket* packet = enet_packet_create(shutdownMsg.data(), shutdownMsg.size(), ENET_PACKET_FLAG_RELIABLE);
     enet_host_broadcast(server, 0, packet);
     enet_host_flush(server);
-
-    uint32_t start = SDL_GetTicks();
-    while (SDL_GetTicks() - start < 1000) {
-        enet_host_service(server, &event, 0);
-    }
 
     enet_host_destroy(server);
 

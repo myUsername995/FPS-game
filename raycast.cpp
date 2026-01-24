@@ -810,7 +810,12 @@ int main(int argc, char* argv[]){
         connection.sendData(state.player, state.player.playerID);
 
         // Receive data right before rendering so that we get the most up to date data
-        if (connection.receiveData(state)){
+        bool packetReceived, packetShutdown, packetKicked, packetCorruptedData;
+        connection.receiveData(state, packetReceived, packetShutdown, packetKicked, packetCorruptedData);
+
+        if (packetShutdown || packetKicked || packetCorruptedData) return 0;
+
+        if (packetReceived){
             pingTime.end();
             state.player.ping = pingTime.getTime();
         }
