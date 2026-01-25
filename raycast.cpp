@@ -42,11 +42,28 @@ constexpr int numGuns = 2;
 const double walkSpeed = 0.005;
 const double sprintSpeed = 0.008;
 
+double FPS = 0;
+
 // Textures of the sprites and walls
 std::vector<Texture> wallTextures;
 std::vector<Texture> spriteTextures;
-std::array<Texture, 8> playerTextures;
+
+/*
+The players texture are put like this into a linear array ->
+0-31: run texture
+32-39: standing texture
+39-44: death texture
+44-47: shoot texture
+48: hit texture
+49-x: other textures
+*/
+
 std::array<std::array<Texture, 8>, 4> playerRunTextures;
+std::array<Texture, 8> playerTextures;
+std::array<Texture, 5> playerDeathTextures;
+std::array<Texture, 3> playerShootTextures;
+Texture playerHitTexture;
+
 std::vector<Texture> screenTextures;
 Texture skyTexture;
 
@@ -177,39 +194,79 @@ void parsePlayerTextures(const std::string& path){
         return;
     }
 
+    auto getRect = [](int x, int y) -> SDL_Rect {
+        // Account for the one pixel gap
+        SDL_Rect rect;
+        rect.x = x * 65;
+        rect.y = y * 65;
+        rect.w = 64;
+        rect.h = 64;
+
+        return rect;
+    };
+
     // Every picture is 64 by 64 pixels, we want the first row of 8 pictures. Additionally there is a 1 pixel gap between each picture
     // Go through 5 rows -> 1st row: standing player, 1st-5th rows: running player (animation)
-    for (int j = 0; j < 5; j++){
-        int y = j * 65;
+
+    // Standing
+    for (int i = 0; i < 8; i++){
+        playerTextures[i].texture = SDL_CreateSurface(64, 64, SDL_PIXELFORMAT_RGBA8888);
+        playerTextures[i].width = 64;
+        playerTextures[i].height = 64;
+
+        // Where to copy it from, from the image of images
+        SDL_Rect srcRect = getRect(i, 0);
+        SDL_BlitSurface(surface, &srcRect, playerTextures[i].texture, NULL);
+
+        flipSurfaceVertical(&playerTextures[i].texture);
+    }
+
+    // Running
+    for (int j = 1; j < 5; j++){
         for (int i = 0; i < 8; i++){
-            // Account for the one pixel gap
-            int x = i * 65;
+            playerRunTextures[j-1][i].texture = SDL_CreateSurface(64, 64, SDL_PIXELFORMAT_RGBA8888);
+            playerRunTextures[j-1][i].width = 64;
+            playerRunTextures[j-1][i].height = 64;
 
-            if (j == 0){
-                playerTextures[i].texture = SDL_CreateSurface(64, 64, SDL_PIXELFORMAT_RGBA8888);
+            // Where to copy it from, from the image of images
+            SDL_Rect srcRect = getRect(i, j);
+            SDL_BlitSurface(surface, &srcRect, playerRunTextures[j-1][i].texture, NULL);
 
-                playerTextures[i].width = 64;
-                playerTextures[i].height = 64;
-
-                // Where to copy it from, from the image of images
-                SDL_Rect srcRect = {x, y, 64, 64};
-                SDL_BlitSurface(surface, &srcRect, playerTextures[i].texture, NULL);
-
-                flipSurfaceVertical(&playerTextures[i].texture);
-            }
-            else {
-                playerRunTextures[j-1][i].texture = SDL_CreateSurface(64, 64, SDL_PIXELFORMAT_RGBA8888);
-
-                playerRunTextures[j-1][i].width = 64;
-                playerRunTextures[j-1][i].height = 64;
-
-                // Where to copy it from, from the image of images
-                SDL_Rect srcRect = {x, y, 64, 64};
-                SDL_BlitSurface(surface, &srcRect, playerRunTextures[j-1][i].texture, NULL);
-
-                flipSurfaceVertical(&playerRunTextures[j-1][i].texture);
-            }
+            flipSurfaceVertical(&playerRunTextures[j-1][i].texture);
         }
+    }
+
+    // Death
+    for (int i = 0; i < 5; i++){
+        playerDeathTextures[i].texture = SDL_CreateSurface(64, 64, SDL_PIXELFORMAT_RGBA8888);
+        playerDeathTextures[i].width = 64;
+        playerDeathTextures[i].height = 64;
+
+        SDL_Rect srcRect = getRect(i, 5);
+        SDL_BlitSurface(surface, &srcRect, playerDeathTextures[i].texture, NULL);
+        
+        flipSurfaceVertical(&playerDeathTextures[i].texture);
+    }
+
+    // Hit
+    SDL_Rect srcRect = getRect(7, 5);
+    playerHitTexture.texture = SDL_CreateSurface(64, 64, SDL_PIXELFORMAT_RGBA8888);
+    playerHitTexture.width = 64;
+    playerHitTexture.height = 64;
+    SDL_BlitSurface(surface, &srcRect, playerHitTexture.texture, NULL);
+
+    flipSurfaceVertical(&playerHitTexture.texture);
+
+    // Shoot
+    for (int i = 0; i < 3; i++){
+        playerShootTextures[i].texture = SDL_CreateSurface(64, 64, SDL_PIXELFORMAT_RGBA8888);
+        playerShootTextures[i].width = 64;
+        playerShootTextures[i].height = 64;
+
+        SDL_Rect srcRect = getRect(i, 6);
+        SDL_BlitSurface(surface, &srcRect, playerShootTextures[i].texture, NULL);
+
+        flipSurfaceVertical(&playerShootTextures[i].texture);
     }
 }
 
@@ -385,10 +442,11 @@ void renderTab(const Font& curFont, const gameState& state){
     std::pair<float, float> userHeights = getWidthAndHeight(curFont.normal, state.player.username);
 
     float verticalGap = 10; // The gap between entries
-    float rectWidth = 500; // width of the tab
-    float gap1 = 150; // gap between username and ping
-    float gap2 = 100; // gap between the ping and kills
-    float gap3 = 100; // gap between the kills and health
+    float gap1 = 150;
+    float gap2 = 100;
+    float gap3 = 100;
+    float gap4 = 100;
+    float rectWidth = gap1 + gap2 + gap3 + gap4 + 100; // width of the tab
 
     float height = userHeights.second; // Height of each username
     SDL_Color tabColor = {64, 64, 64, 127};
@@ -412,29 +470,34 @@ void renderTab(const Font& curFont, const gameState& state){
     SDL_FPoint rectStart = {WINDOW_WIDTH / 2 - rectWidth / 2, 0};
     SDL_FPoint textStart = {headerRect.x + 10, headerRect.y};
 
-    auto renderTabEntry = [&textStart, gap1, gap2, gap3, verticalGap, height, rectWidth]
-                          (std::string name, std::string ping, std::string kills, std::string health, TTF_Font* font){
+    auto renderTabEntry = [&textStart, gap1, gap2, gap3, gap4, verticalGap, height, rectWidth]
+                          (std::string name, std::string ping, std::string FPS, std::string kills, std::string health, TTF_Font* font){
         float curY = textStart.y;
         float centeredY = curY + verticalGap / 2;
         SDL_FPoint userText = {textStart.x, centeredY};
         SDL_FPoint pingText = {textStart.x + gap1, centeredY};
-        SDL_FPoint killText = {pingText.x + gap2, centeredY};
-        SDL_FPoint healthText = {killText.x + gap3, centeredY};
+        SDL_FPoint FPSText = {pingText.x + gap2, centeredY};
+        SDL_FPoint killText = {FPSText.x + gap3, centeredY};
+        SDL_FPoint healthText = {killText.x + gap4, centeredY};
+
         GPURenderRect({userText.x-10, curY, gap1, height+verticalGap}, {255, 255, 255, 255}, false);
         GPURenderText(font, name, userText, {255, 255, 255, 255});
 
         GPURenderRect({pingText.x-10, curY, gap2, height+verticalGap}, {255, 255, 255, 255}, false);
         GPURenderText(font, ping, pingText, {255, 255, 255, 255});
 
-        GPURenderRect({killText.x-10, curY, gap3, height+verticalGap}, {255, 255, 255, 255}, false);
+        GPURenderRect({FPSText.x-10, curY, gap3, height+verticalGap}, {255, 255, 255, 255}, false);
+        GPURenderText(font, FPS, FPSText, {255, 255, 255, 255});
+
+        GPURenderRect({killText.x-10, curY, gap4, height+verticalGap}, {255, 255, 255, 255}, false);
         GPURenderText(font, kills, killText, {255, 255, 255, 255});
 
-        GPURenderRect({healthText.x-10, curY, rectWidth - (gap1 + gap2 + gap3), height+verticalGap}, {255, 255, 255, 255}, false);
+        GPURenderRect({healthText.x-10, curY, rectWidth - (gap1 + gap2 + gap3 + gap4), height+verticalGap}, {255, 255, 255, 255}, false);
         GPURenderText(font, health, healthText, {255, 255, 255, 255});
     };
 
     // Header descriptions
-    renderTabEntry("Username", "Ping", "Kills", "Health", curFont.bold);
+    renderTabEntry("Username", "Ping", "FPS", "Kills", "Health", curFont.bold);
 
     // Initialise the players array
     std::vector<Player> allPlayers(numEntries);
@@ -445,8 +508,8 @@ void renderTab(const Font& curFont, const gameState& state){
         rectStart.y += height + verticalGap;
         textStart.y += height + verticalGap;
 
-        renderTabEntry(allPlayers[i].username, std::to_string(allPlayers[i].ping), std::to_string(0), std::to_string(allPlayers[i].health), 
-                       curFont.normal);
+        renderTabEntry(allPlayers[i].username, std::to_string(allPlayers[i].ping), std::to_string(int(FPS)), 
+                       std::to_string(allPlayers[i].numKills), std::to_string(allPlayers[i].health), curFont.normal);
     }
 }
 
@@ -478,7 +541,7 @@ void renderPlayerNames(const std::string& fontName, const gameState& state){
 void calculateShot(gameState& state, int& hitIdx, float& dmgDealt){
     // The closest player to us gets shot (even if there are multiple hits)
     double closestHit = INFINITY;
-    int hitIndex = -1;
+    int hitIndexID = -1; // Stores playerID
 
     // Calculate ray-player intersections
     Vector ray = state.player.lookDir.normalize();
@@ -497,7 +560,7 @@ void calculateShot(gameState& state, int& hitIdx, float& dmgDealt){
         double distance = point.length();
         if (distance < closestHit){
             closestHit = distance;
-            hitIndex = enemy.playerID;
+            hitIndexID = enemy.playerID;
         }
     }
 
@@ -508,7 +571,9 @@ void calculateShot(gameState& state, int& hitIdx, float& dmgDealt){
     else {
         dmgDealt = 0;
     }
-    hitIdx = hitIndex;
+
+    // Output the ID
+    hitIdx = hitIndexID;
 }
 
 int main(int argc, char* argv[]){
@@ -563,11 +628,8 @@ int main(int argc, char* argv[]){
     parsePlayerTextures("player.png");
     parseScreenTextures("guns.png");
 
-    // Convert the 3 different sprite texture arrays into one flattened one (0 - 32 -> player run textures, 32 - 40 -> player textures, 
-    // 40 - x -> sprite textures)
-    int numRunTexs = playerRunTextures.size() * playerRunTextures[0].size();
-    int fullNumSprites = playerTextures.size() + numRunTexs + spriteTextures.size();
-    std::vector<Texture> allSpriteTextures(fullNumSprites);
+    // Convert the 3 different sprite texture arrays into one flattened one
+    std::vector<Texture> allSpriteTextures(49 + spriteTextures.size());
 
     // Run texs
     for (int i = 0; i < 4; i++){
@@ -580,9 +642,20 @@ int main(int argc, char* argv[]){
     for (int i = 0; i < 8; i++){
         allSpriteTextures[32 + i] = playerTextures[i];
     }
+    // Death texs
+    for (int i = 0; i < 5; i++){
+        allSpriteTextures[40 + i] = playerDeathTextures[i];
+    }
+    // Shoot texs
+    for (int i = 0; i < 3; i++){
+        allSpriteTextures[45 + i] = playerShootTextures[i];
+    }
+    // Hit texture
+    allSpriteTextures[48] = playerHitTexture;
+
     // Normal sprite textures
     for (int i = 0; i < spriteTextures.size(); i++){
-        allSpriteTextures[40 + i] = spriteTextures[i];
+        allSpriteTextures[49 + i] = spriteTextures[i];
     }
 
     state.wallTextures = wallTextures;
@@ -595,12 +668,18 @@ int main(int argc, char* argv[]){
     loadFont(times, "TIMES", 20);
 
     double FPSCap = 1000;
-    double FPS = 0;
     double dt = 0;
  
     double gunAnimationAccumulate = 0;
     double gunShootAccumulate = 0;
     double gunFrame = 0;
+
+    double deathAnimationAccumulate = 0;
+    double deathAnimationSpeed = 300; // 300ms between frames
+    double deathFrame = 0;
+
+    double hitDuration = 300; // The duration where the hit animation shows
+    double hitAccumulation = 0;
 
     double playerSpeed = walkSpeed;
     double rotationSpeed = 0.01;
@@ -773,6 +852,22 @@ int main(int argc, char* argv[]){
             state.player.gunFrame = getGunFrame(state.player.gunType, gunFrame);
         }
 
+        // Render the death animation (for other players)
+        if (state.player.health <= 0 && deathAnimationAccumulate >= deathAnimationSpeed){
+            deathAnimationAccumulate = 0;
+
+            state.player.deadFrame++;
+
+            if (state.player.deadFrame >= 5) state.player.deadFrame = 4;
+        }
+
+        // Render the hit animation (don't render if the player is dead)
+        if (state.player.hit) hitAccumulation += dt;
+        if (state.player.health <= 0 || hitAccumulation >= hitDuration){
+            hitAccumulation = 0;
+            state.player.hit = false;
+        }
+
         bool cameraChanged = rightMouseButtonDown;
         if (rightMouseButtonDown){
             double changeX = start_pan.x - x;
@@ -799,10 +894,10 @@ int main(int argc, char* argv[]){
             animationAccumulate = 0;
         }
 
-        float width = state.map.size();
-        float height = state.map[0].size();
-
         pingTime.begin();
+
+        // Check if our health has changed
+        int prevHealth = state.player.health;
 
         // Send our own player data every frame
         connection.sendData(state.player, state.player.playerID);
@@ -822,6 +917,9 @@ int main(int argc, char* argv[]){
             state.player.ping = pingTime.getAvgTime();
         }
 
+        // Determine if we've been hit, and if yes then we just send that to all the other clients later
+        if (state.player.health != prevHealth) state.player.hit = true;
+
         renderMap(window, state);
 
         // Render player's names above their heads
@@ -832,14 +930,6 @@ int main(int argc, char* argv[]){
             // Render player's names on the tab
             renderTab(times, state);
         }
-
-        SDL_FRect rect = GPURenderText(arial.normal, "FPS: " + std::to_string(FPS), {10, 10}, {255, 255, 255, 255});
-
-        rect.y += rect.h + 10;
-        rect = GPURenderText(arial.normal, "Health: " + std::to_string(state.player.health), {rect.x, rect.y}, {255, 255, 255, 255});
-
-        rect.y += rect.h + 10;
-        rect = GPURenderText(arial.normal, "Hit: " + std::to_string(state.player.playerHit), {rect.x, rect.y}, {255, 255, 255, 255});
 
         SDL_GL_SwapWindow(window);
 
@@ -852,6 +942,7 @@ int main(int argc, char* argv[]){
 
         gunAnimationAccumulate += dt;
         gunShootAccumulate += dt;
+        deathAnimationAccumulate += dt;
 
         prevLeftMouseDown = leftMouseDown;
     }

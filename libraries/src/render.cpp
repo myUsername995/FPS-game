@@ -340,6 +340,10 @@ bool createInputTextures(const gameState& state, int numWallTexs, int numSpriteT
     SDL_Surface* spriteAtlas = generateAtlas(spriteTextures, spriteUVs);
     SDL_Surface* screenAtlas = generateAtlas(screenTextures, screenUVs);
 
+    IMG_SavePNG(wallAtlas, "constTextures\\debugWallAtlas.png");
+    IMG_SavePNG(spriteAtlas, "constTextures\\debugSpriteAtlas.png");
+    IMG_SavePNG(screenAtlas, "constTextures\\debugScreenAtlas.png");
+
     // Free the textures
     for (int i = 0; i < numWallTexs; i++) SDL_DestroySurface(wallTextures[i]);
     for (int i = 0; i < numSpriteTexs; i++) SDL_DestroySurface(spriteTextures[i]);
@@ -386,6 +390,15 @@ bool createInputTextures(const gameState& state, int numWallTexs, int numSpriteT
     return true;
 }
 
+/*
+The players texture are put like this into a linear array ->
+0-31: run texture
+32-39: standing texture
+39-44: death texture
+44-47: shoot texture
+48: hit texture
+49-x: other textures
+*/
 int calculatePlayerTexIndex(Player& otherPlayer, const gameState& state){
     Vector spriteDir = otherPlayer.lookDir.normalize();
     Vector toCamera;
@@ -404,6 +417,15 @@ int calculatePlayerTexIndex(Player& otherPlayer, const gameState& state){
     int playerTexture = int((deg + 22.5) / 45.0) % 8;
 
     // Assign texture
+    // Hit texture
+    if (otherPlayer.hit) return 48;
+
+    // Fired
+    if (otherPlayer.fired) return 45 + SDL_clamp(otherPlayer.gunFrame, 0, 2);
+
+    // Dead
+    if (otherPlayer.health <= 0) return 40 + otherPlayer.deadFrame;
+
     // Running texture
     if (otherPlayer.isMoving) return otherPlayer.animationStep * 8 + playerTexture;
 
@@ -449,7 +471,7 @@ void fillSpriteArrays(const gameState& state){
             spritesData[i].invisColor[1] = 0.0f / 255.0f;
             spritesData[i].invisColor[2] = 0.0f / 255.0f;
 
-            spritesData[i].texture = 40 + state.sprites[i].texture;
+            spritesData[i].texture = 49 + state.sprites[i].texture;
 
             spritesData[i].width = curTex.width;
             spritesData[i].height = curTex.height;
@@ -485,10 +507,6 @@ int initShaders(SDL_Window* window, const gameState& state){
     std::string floorStr = LoadFile(computeFolder + "\\floor.glsl");
     std::string ceilingStr = LoadFile(computeFolder + "\\ceiling.glsl");
     std::string spriteStr = LoadFile(computeFolder + "\\sprites.glsl");
-
-    // // Changes the source code of the .glsl files, so that multiple textures can be rendered
-    // generateMapTextures(wallStr, floorStr, ceilingStr, numWallTexs);
-    // generateSpriteTextures(spriteStr, numSpriteTexs - 40); // Don't include player textures
 
     // Initialize the rendering output
     initQuad();

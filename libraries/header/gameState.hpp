@@ -89,15 +89,18 @@ class Player {
         // Use this to animate players
         bool isMoving = false;
         int animationStep = 0;
+        int deadFrame = 0;
+        int gunFrame = 0;
+        int gunType = -1;        // 0 -> pistol 1 -> bigger gun thingy
+
+        bool fired;
+        bool hit;
 
         float dmgDealt;
         int playerHit = -1;
         int health = 100;
 
-        int gunFrame = 0;
-        int gunType = -1;        // 0 -> pistol 1 -> bigger gun thingy
-        bool fired;
-
+        int numKills = 0;
         float ping;
 };
 

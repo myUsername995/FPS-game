@@ -11,7 +11,7 @@ ON CLIENT INPUT:
 -WARNING: No validation is performed for data sent by clients, other than length validation. (cuz hell yeh)
 
 Commands:
-print (LOGTYPE) -> prints the logs
+print (LOGTYPE) -> prints the logs (connections, errors, tab)
 shutdown -> sends shutdown packets to clients, and destroy's the server
 kick (USERNAME) -> kicks an user.
 
@@ -30,14 +30,42 @@ kick (USERNAME) -> kicks an user.
 #include <conio.h>
 #include <algorithm>
 #include <thread>
+#include "time.hpp"
 
 bool run = true;
 
 int maxUsername = 16;
 
+enum connectionType {
+    CONNECT,
+    DISCONNECT,
+    KICK
+};
+
+enum errorType {
+    TOO_MANY_PLAYERS,
+    USERNAME_LIMIT_EXCEEDED
+};
+
+struct Connection {
+    connectionType type;
+    std::string username;
+    std::string ip;
+    int port;
+    int userID;
+    double time; // Measure the time of disconnect / kick / connect in MS
+};
+
+struct Error {
+    errorType type;
+    std::string description;
+};
+
 // Where we log server messages
-std::ostringstream errors;
-std::ostringstream connections;
+std::vector<Connection> connectionLogs; // Stores every connect / disconnect / kick
+std::vector<Error> errorLogs;
+std::vector<Connection> tabLogs; // Stores the current players
+
 int numPlayers = 0;
 
 enum PacketType : uint8_t {
@@ -70,15 +98,20 @@ struct Network_player {
     float lookDirY;
 
     // Animation related data
+    uint8_t hasFired;
     uint8_t isMoving;
+    uint8_t isHit;
+
     uint8_t animationStep;
-    int8_t gunFrame;
+    uint8_t deathFrame;
+    uint8_t gunFrame;
 
     // Send which player we hit, then the server sends back their health
     int8_t playerHit;
     int8_t health;
+    int8_t numKills;
 };
-static_assert(sizeof(Network_player) == 68);
+static_assert(sizeof(Network_player) == 72);
 
 // These two arrays are synchronised, but they server different purposes
 std::vector<Network_player> players;
@@ -95,6 +128,41 @@ struct sprite {
     float x, y;
     int texture;
 };
+
+std::string connectionName(connectionType type){
+    switch (type){
+        case CONNECT: return "CONNECT";
+        case DISCONNECT: return "DISCONNECT";
+        case KICK: return "KICK";
+    }
+
+    return "";
+}
+
+std::string errorName(errorType type){
+    switch (type){
+        case TOO_MANY_PLAYERS: return "TOO_MANY_PLAYERS";
+        case USERNAME_LIMIT_EXCEEDED: return "USERNAME_LIMIT_EXCEEDED";
+    }
+
+    return "";
+}
+
+// Convert to a HOUR\MINUTE\SECOND format
+std::string convertDate(double ms){
+    std::ostringstream date;
+
+    // Keep as doubles to preserve accuracy
+    int totalSeconds = ms / 1000;
+    int hours = totalSeconds / 3600;
+    int minutes = (totalSeconds % 3600) / 60;
+    int seconds = totalSeconds % 60;
+
+    // Convert to ints and format the string
+    date << hours << ":" << minutes << ":" << seconds;
+
+    return date.str();
+}
 
 // Append the type information to the front of the packet, length must be specified in bytes
 std::vector<uint8_t> convertData(PacketType type, uint32_t sendID, void* ptr, size_t length){
@@ -224,6 +292,43 @@ void centerText(const std::string& str, const std::string& fillStr){
     std::cout << std::string(padding, fillStr[0]) << str << std::string(padding, fillStr[0]) << "\n";
 }
 
+template<typename... Entry>
+void drawEntry(Entry... entry){
+    constexpr size_t numArgs = sizeof...(entry);
+    std::array<std::string, numArgs> entries = {entry...};
+
+    // Draw each entry at a predetermined location and trust that the user doesn't input more than like 5 entries
+    int gap = 24;
+
+    for (int i = 0; i < numArgs; i++){
+        int numChars = entries[i].size();
+        int skip = gap - numChars;
+        if (skip < 0) skip = 1;
+
+        std::cout << entries[i] << std::string(skip, ' ');
+    }
+    std::cout << "\n";
+}
+
+template<typename... Args>
+bool matchInput(const std::vector<std::string>& words, Args... args){
+    constexpr int numArguements = sizeof...(args);
+    // Not enough words
+    if (words.size() < numArguements){
+        return false;
+    }
+
+    std::string arr[numArguements] = {args...};
+
+    for (int i = 0; i < numArguements; i++){
+        if (words[i] != arr[i]){
+            return false;
+        }
+    }
+
+    return true;
+}
+
 // Parses a word starting at some index "idx" in the string "input", returns the next word, and writes the index of the end of that word 
 // into "idx"
 std::string parseWord(const std::string& input, int& idx, bool toLower){
@@ -284,30 +389,16 @@ void kickPlayer(ENetHost* server, const std::string& username){
     enet_host_flush(server);
 
     numPlayers--;
-    connections << "Type: (kicked), ";
-    connections << "Username: (" << username << "), ";
-    connections << "IP Address: (" << playerData->ip << ":" << playerData->port << "), ";
-    connections << "Number of players: (" << numPlayers << ")\n";
+
+    Connection log;
+    log.type = KICK;
+    log.username = username;
+    log.ip = playerData->ip;
+    log.ip += ":" + std::to_string(playerData->port);
+    log.userID = playerData->playerID;
+    connectionLogs.push_back(log);
+
     enet_peer_reset(playerToKick);
-}
-
-template<typename... Args>
-bool matchInput(const std::vector<std::string>& words, Args... args){
-    constexpr int numArguements = sizeof...(args);
-    // Not enough words
-    if (words.size() < numArguements){
-        return false;
-    }
-
-    std::string arr[numArguements] = {args...};
-
-    for (int i = 0; i < numArguements; i++){
-        if (words[i] != arr[i]){
-            return false;
-        }
-    }
-
-    return true;
 }
 
 void parseInput(ENetHost* server, const std::string& input){
@@ -320,11 +411,34 @@ void parseInput(ENetHost* server, const std::string& input){
     }
     else if (matchInput(words, "print", "errors")){
         centerText("ERRORS", "=");
-        std::cout << errors.str();
+        // Header
+        drawEntry("Type", "Description");
+        // Content
+        for (int i = 0; i < errorLogs.size(); i++){
+            drawEntry(errorName(errorLogs[i].type), errorLogs[i].description);
+        }
     }
     else if (matchInput(words, "print", "connections")){
         centerText("CONNECTIONS", "=");
-        std::cout << connections.str();
+        // Header
+        drawEntry("Type", "Username", "IP", "ID", "Time");
+        for (int i = 0; i < connectionLogs.size(); i++){
+            std::ostringstream ip;
+            ip << connectionLogs[i].ip << ":" << connectionLogs[i].port;
+
+            drawEntry(connectionName(connectionLogs[i].type), connectionLogs[i].username, ip.str(), 
+                      std::to_string(connectionLogs[i].userID), convertDate(connectionLogs[i].time));
+        }
+    }
+    else if (matchInput(words, "print", "tab")){
+        centerText("TAB", "=");
+        drawEntry("Username", "IP", "ID", "Join time");
+        for (int i = 0; i < tabLogs.size(); i++){
+            std::ostringstream ip;
+            ip << tabLogs[i].ip << ":" << tabLogs[i].port;
+
+            drawEntry(tabLogs[i].username, ip.str(), std::to_string(tabLogs[i].userID), convertDate(connectionLogs[i].time));
+        }
     }
     else if (matchInput(words, "kick")){
         // See which username was typed in
@@ -367,12 +481,14 @@ void readInput(ENetHost* server, std::string& input){
 }
 
 void resolveShot(Network_player& p){
+    // Check if we hit any player
     if (p.playerHit != -1){
-        // Change the other player's health
+        // Only reset the health on the server side, because it would be slower to resolve it clientside because I send all the 
+        // players to the clients instead of just one
         players[p.playerHit].health -= p.dmgDealt;
-        if (players[p.playerHit].health <= 0){
-            players[p.playerHit].health = 100;
-        }
+
+        // The health can't be less than 0
+        if (players[p.playerHit].health < 0) players[p.playerHit].health = 0;
     }
 }
 
@@ -418,6 +534,10 @@ int main(int argc, char* argv[]){
         return 0;
     }
 
+    // Measure the elapsed time
+    Clk serverTime;
+    serverTime.begin();
+
     std::string input;
     SDL_Event SDLEvent;
     ENetEvent event;
@@ -431,14 +551,22 @@ int main(int argc, char* argv[]){
                     std::string username = getRandomName(randNames, numNames);
 
                     if (username.size() > maxUsername){
-                        errors << username << ": Username can't be longer than " << maxUsername << " characters.\n";
+                        Error log;
+                        log.type = USERNAME_LIMIT_EXCEEDED;
+                        log.description = username + " is longer than the allowed limit of " + std::to_string(maxUsername);
+                        errorLogs.push_back(log);
+
                         enet_peer_reset(event.peer); break;
                     }
 
                     // Give him an ID
                     int playerID = findAvailableID(availableIDs);
                     if (playerID == -1){
-                        errors << "Too many players, can't assign ID to " << username << ".\n";
+                        Error log;
+                        log.type = TOO_MANY_PLAYERS;
+                        log.description = "Can't assign ID to " + username;
+                        errorLogs.push_back(log);
+
                         enet_peer_reset(event.peer); break;
                     }
                     availableIDs[playerID] = false;
@@ -455,10 +583,17 @@ int main(int argc, char* argv[]){
                     enet_address_get_host_ip(&event.peer->address, ip, sizeof(ip));
                     uint32_t port = event.peer->address.port;
 
-                    connections << "Type: (connect), ";
-                    connections << "Username: (" << username << "), ";
-                    connections << "IP Address: (" << ip << ":" << port << "), ";
-                    connections << "Number of players: (" << numPlayers << ")\n";
+                    serverTime.end();
+
+                    Connection log;
+                    log.type = CONNECT;
+                    log.username = username;
+                    log.ip = ip;
+                    log.port = port;
+                    log.userID = playerID;
+                    log.time = serverTime.getTime();
+                    connectionLogs.push_back(log);
+                    tabLogs.push_back(log);
 
                     // Store safe client data
                     event.peer->data = new ClientData{static_cast<uint32_t>(playerID), username, ip, port};
@@ -512,11 +647,12 @@ int main(int argc, char* argv[]){
 
                     resolveShot(curPlayer);
 
-                    // Don't change the health
+                    // This variable must be set by the server, so don't change it
                     int prevHealth = players[index].health;
 
                     // Store on the server side for easy access
                     players[index] = curPlayer;
+
                     players[index].health = prevHealth;
 
                     // Convert our data
@@ -533,10 +669,28 @@ int main(int argc, char* argv[]){
                 case ENET_EVENT_TYPE_DISCONNECT: {
                     numPlayers--;
                     ClientData* cData = static_cast<ClientData*>(event.peer->data);
-                    connections << "Type: (disconnect), ";
-                    connections << "Username: (" << cData->username << "), ";
-                    connections << "IP Address: (" << cData->ip << ":" << cData->port << "), ";
-                    connections << "Number of players: (" << numPlayers << ")\n";
+
+                    serverTime.end();
+
+                    // Add a new connection log
+                    Connection log;
+                    log.type = DISCONNECT;
+                    log.username = cData->username;
+                    log.ip = cData->ip;
+                    log.port = cData->port;
+                    log.userID = cData->playerID;
+                    log.time = serverTime.getTime();
+                    connectionLogs.push_back(log);
+
+                    // Remove the player from our tab
+                    int removeIndex = -1;
+                    for (int i = 0; i < tabLogs.size(); i++){
+                        if (tabLogs[i].userID == static_cast<int>(cData->playerID)){
+                            removeIndex = i;
+                            break;
+                        }
+                    }
+                    if (removeIndex != -1) tabLogs.erase(tabLogs.begin() + removeIndex);
 
                     if (event.peer->data) {
                         // Free the ID and username for later usage by other clients

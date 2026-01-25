@@ -42,15 +42,20 @@ struct Network_player {
     float lookDirY;
 
     // Animation related data
+    uint8_t hasFired;
     uint8_t isMoving;
+    uint8_t isHit;
+
     uint8_t animationStep;
-    int8_t gunFrame;
+    uint8_t deathFrame;
+    uint8_t gunFrame;
 
     // Send which player we hit, then the server sends back their health
     int8_t playerHit;
     int8_t health;
+    int8_t numKills;
 };
-static_assert(sizeof(Network_player) == 68);
+static_assert(sizeof(Network_player) == 72);
 
 // Convert the bytes sent from the network into the 3 segments
 void convertData(const std::vector<uint8_t>& buffer, PacketType& type, uint32_t& sendID, std::vector<uint8_t>& data){
@@ -361,11 +366,15 @@ void Client::receiveData(gameState& state, bool& receivedRoundTrip, bool& shutdo
                         p.isMoving = (netP.isMoving == 1);
                         p.animationStep = netP.animationStep;
                         p.ping = netP.ping;
-                        p.health = netP.health;
                         p.gunFrame = netP.gunFrame;
+                        p.health = netP.health;
+                        p.fired = netP.hasFired;
+                        p.numKills = netP.numKills;
+                        p.hit = netP.isHit;
+                        p.deadFrame = netP.deathFrame;
                     };
 
-                    // Only copy the health for the player
+                    // Only copy these values for the player
                     state.player.health = network_player.health;
 
                     state.otherPlayers.resize(numOtherPlayers);
@@ -412,8 +421,11 @@ void Client::sendData(const Player& player, int playerID){
     p.ping = player.ping;
     p.playerHit = player.playerHit;
     p.dmgDealt = player.dmgDealt;
-    p.health = player.health;
     p.gunFrame = player.gunFrame;
+    p.deathFrame = player.deadFrame;
+    p.numKills = player.numKills;
+    p.hasFired = player.fired;
+    p.isHit = player.hit;
 
     ENetPacket* packet = enet_packet_create(&p, sizeof(p), ENET_PACKET_FLAG_RELIABLE);
 
