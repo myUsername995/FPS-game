@@ -597,7 +597,7 @@ int main(int argc, char* argv[]){
     double FPSCap = 1000;
     double FPS = 0;
     double dt = 0;
-
+ 
     double gunAnimationAccumulate = 0;
     double gunShootAccumulate = 0;
     double gunFrame = 0;
@@ -808,8 +808,8 @@ int main(int argc, char* argv[]){
         connection.sendData(state.player, state.player.playerID);
 
         // Receive data right before rendering so that we get the most up to date data
-        bool packetReceived, packetShutdown, packetKicked, packetCorruptedData;
-        connection.receiveData(state, packetReceived, packetShutdown, packetKicked, packetCorruptedData);
+        bool packetReceivedRoundTrip, packetShutdown, packetKicked, packetCorruptedData;
+        connection.receiveData(state, packetReceivedRoundTrip, packetShutdown, packetKicked, packetCorruptedData);
 
         if (packetShutdown) std::cout << "The server shut down.\n";
         if (packetKicked) std::cout << "You've been kicked from the server.\n";
@@ -817,9 +817,9 @@ int main(int argc, char* argv[]){
 
         if (packetShutdown || packetKicked || packetCorruptedData) return 0;
 
-        if (packetReceived){
+        if (packetReceivedRoundTrip){
             pingTime.end();
-            state.player.ping = pingTime.getTime();
+            state.player.ping = pingTime.getAvgTime();
         }
 
         renderMap(window, state);

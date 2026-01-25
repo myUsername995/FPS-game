@@ -271,17 +271,17 @@ void Client::disconnectFromServer(){
 }
 
 // Receives data from the server
-void Client::receiveData(gameState& state, bool& received, bool& shutdown, bool& kicked, bool& corruptedData){
+// ReceivedRoundTrip is used to measure ping like this -> we send data and start a timer, the server sends us back our own data with 
+// our own sendID, we detect that the server just sent back our own data, so we end the timer and thats our ping.
+void Client::receiveData(gameState& state, bool& receivedRoundTrip, bool& shutdown, bool& kicked, bool& corruptedData){
     shutdown = false;
     kicked = false;
     corruptedData = false;
-    received = false;
+    receivedRoundTrip = false;
 
     ENetEvent event;
     while (enet_host_service(Client::client, &event, 0) > 0){
         if (event.type == ENET_EVENT_TYPE_RECEIVE){
-            received = true;
-
             // Read the data sent by the server
             std::vector<uint8_t> buffer(event.packet->dataLength);
             memcpy(buffer.data(), event.packet->data, event.packet->dataLength);
@@ -305,8 +305,10 @@ void Client::receiveData(gameState& state, bool& received, bool& shutdown, bool&
                     return;
                 }
                 case PACKET_DATA: {
-                    // If the sendID is the same as our ID, that means we sent our packet to ourselves, so just discard it
+                    // If the sendID is the same as our ID, that means we sent our packet to ourselves, so set this value to true
+                    // and then discard it
                     if (sendID == state.player.playerID){
+                        receivedRoundTrip = true;
                         return;
                     }
 

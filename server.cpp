@@ -40,7 +40,7 @@ std::ostringstream errors;
 std::ostringstream connections;
 int numPlayers = 0;
 
-enum PacketType {
+enum PacketType : uint8_t {
     // Sent during gameplay
     PACKET_KICK,
     PACKET_SHUTDOWN,
