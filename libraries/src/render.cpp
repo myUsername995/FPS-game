@@ -386,76 +386,6 @@ bool createInputTextures(const gameState& state, int numWallTexs, int numSpriteT
     return true;
 }
 
-// // GENERATE TEXTURES FOR WALL, FLOOR AND CEILING SHADER
-// void generateMapTextures(std::string& wallStr, std::string& floorStr, std::string& ceilingStr, int numTextures){
-//     if (numTextures == 0) numTextures = 1;
-
-//     // The length of a tab
-//     std::string tab = "    ";
-
-//     // Insert the uniforms into every string first
-//     std::string arrSize = std::to_string(numTextures);
-//     std::string uniforms = "uniform sampler2D textures[" + arrSize + "];";
-
-//     // Search for the identifier "// UNIFORMS""
-//     std::string uniformID = "// UNIFORMS\n";
-
-//     // Find positions
-//     int wallUniform = wallStr.find(uniformID) + uniformID.length();
-//     int floorUniform = floorStr.find(uniformID) + uniformID.length();
-//     int ceilingUniform = ceilingStr.find(uniformID) + uniformID.length();
-
-//     // Insert into the right place
-//     wallStr.insert(wallUniform, uniforms);
-//     floorStr.insert(floorUniform, uniforms);
-//     ceilingStr.insert(ceilingUniform, uniforms);
-
-//     {
-//         std::ofstream file(computeFolder + "\\wallChanged.glsl");
-//         file.write(wallStr.c_str(), wallStr.size());
-
-//         file.close();
-//     }
-//     {
-//         std::ofstream file(computeFolder + "\\floorChanged.glsl");
-//         file.write(floorStr.c_str(), floorStr.size());
-
-//         file.close();
-//     }
-//     {
-//         std::ofstream file(computeFolder + "\\ceilingChanged.glsl");
-//         file.write(ceilingStr.c_str(), ceilingStr.size());
-
-//         file.close();
-//     }
-// }
-
-// // GENERATE TEXTURES FOR SPRITE SHADER
-// void generateSpriteTextures(std::string& spriteStr, int numTextures){
-//     if (numTextures == 0) numTextures = 1;
-
-//     // The length of a tab
-//     std::string tab = "    ";
-
-//     // Insert the uniforms into every string first
-//     std::string arrSize = std::to_string(numTextures);
-//     std::string uniforms = "uniform sampler2D spriteTextures[" + arrSize + "];";
-
-//     // Search for the identifier "// UNIFORMS"
-//     std::string uniformID = "// UNIFORMS\n";
-
-//     // Find positions
-//     int spriteUniform = spriteStr.find(uniformID) + uniformID.length();
-
-//     // Insert into the right place
-//     spriteStr.insert(spriteUniform, uniforms);
-
-//     std::ofstream file(computeFolder + "\\spritesChanged.glsl");
-//     file.write(spriteStr.c_str(), spriteStr.size());
-
-//     file.close();
-// }
-
 int calculatePlayerTexIndex(Player& otherPlayer, const gameState& state){
     Vector spriteDir = otherPlayer.lookDir.normalize();
     Vector toCamera;
@@ -471,7 +401,7 @@ int calculatePlayerTexIndex(Player& otherPlayer, const gameState& state){
     double deg = angle * 180.0 / PI;
     if (deg < 0) deg += 360;
 
-    int playerTexture = (int(((360 - deg) + 22.5) / 45.0) % 8);
+    int playerTexture = int((deg + 22.5) / 45.0) % 8;
 
     // Assign texture
     // Running texture
