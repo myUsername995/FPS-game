@@ -1,9 +1,18 @@
+/*
+The packets have 3 segments:
+1. Identifier (PacketType)
+2. Sender ID (uint32_t)
+3. Data (std::vector<uint8_t>)
+
+Use the convertData() function to acquire these segments from the raw bytes received over the network.
+*/
+
 #include "networking.hpp"
 #include <iostream>
 #include <cassert>
 #include <cstring>
 
-enum PacketType {
+enum PacketType : uint8_t {
     // Sent during gameplay
     PACKET_KICK,
     PACKET_SHUTDOWN,
@@ -23,7 +32,8 @@ struct Network_player {
     uint32_t playerID;
     char username[32];
 
-    double ping;
+    float ping;
+    float dmgDealt;
 
     // Player data
     float posX;
@@ -34,14 +44,27 @@ struct Network_player {
     // Animation related data
     uint8_t isMoving;
     uint8_t animationStep;
-
-    // Only send the health to the other client and the gun frame, so they can change their health and also render our player
-    int8_t health;
     int8_t gunFrame;
-};
 
-static_assert(std::is_trivially_copyable_v<Network_player>);
-static_assert(sizeof(Network_player) == 72);
+    // Send which player we hit, then the server sends back their health
+    int8_t playerHit;
+    int8_t health;
+};
+static_assert(sizeof(Network_player) == 68);
+
+// Convert the bytes sent from the network into the 3 segments
+void convertData(const std::vector<uint8_t>& buffer, PacketType& type, uint32_t& sendID, std::vector<uint8_t>& data){
+    size_t segment1Size = sizeof(uint8_t);
+    size_t segment2Size = sizeof(uint32_t);
+    data.resize(buffer.size() - segment1Size - segment2Size);
+
+    // Remove the bytes from the first two segments
+    int dataSize = buffer.size() - (segment1Size + segment2Size);
+
+    memcpy(&type, buffer.data(), segment1Size);
+    memcpy(&sendID, buffer.data() + segment1Size, segment2Size);
+    memcpy(data.data(), buffer.data() + segment1Size + segment2Size, dataSize);
+}
 
 bool Client::connectToServer(gameState& state, std::string serverIP){
     Client::client = enet_host_create(NULL, 1, 2, 0, 0);
@@ -92,7 +115,7 @@ bool Client::connectToServer(gameState& state, std::string serverIP){
 
     bool receivedAll = false;
 
-    timeout = 5000;
+    timeout = 3000;
     elapsed = 0;
     while (elapsed < timeout){
         int receivedPacket = enet_host_service(client, &event, 100);
@@ -107,13 +130,11 @@ bool Client::connectToServer(gameState& state, std::string serverIP){
             std::vector<uint8_t> buffer(event.packet->dataLength);
             memcpy(buffer.data(), event.packet->data, event.packet->dataLength);
 
-            // The type
-            PacketType type = static_cast<PacketType>(buffer[0]);
-
-            // The data
+            PacketType type;
+            uint32_t sendID; // Send ID doesn't matter here, because it's sent by the server
             std::vector<uint8_t> data;
-            data.resize(buffer.size()-1);
-            memcpy(data.data(), buffer.data() + 1, buffer.size());
+
+            convertData(buffer, type, sendID, data);
 
             // Handle each kind of data differently
             switch (type){
@@ -152,7 +173,7 @@ bool Client::connectToServer(gameState& state, std::string serverIP){
                     int height = state.map[0].size();
 
                     std::vector<int> arr(width * height);
-                    memcpy(arr.data(), data.data(), data.size());
+                    memcpy(arr.data(), data.data(), width * height * sizeof(int));
 
                     for (int i = 0; i < width * height; i++){
                         int x = i / width;
@@ -167,6 +188,7 @@ bool Client::connectToServer(gameState& state, std::string serverIP){
                     int numSprites;
                     memcpy(&numSprites, data.data(), data.size());
 
+                    state.numPlayers = 0;
                     state.numSprites = numSprites;
                     state.fullNumSprites = numSprites;
                     state.sprites.resize(numSprites);
@@ -180,7 +202,7 @@ bool Client::connectToServer(gameState& state, std::string serverIP){
                     };
 
                     std::vector<network_sprite> network_sprites(state.sprites.size());
-                    memcpy(network_sprites.data(), data.data(), data.size());
+                    memcpy(network_sprites.data(), data.data(), state.numSprites * sizeof(network_sprite));
 
                     for (int i = 0; i < state.sprites.size(); i++){
                         state.sprites[i].pos = {network_sprites[i].x, network_sprites[i].y};
@@ -201,24 +223,21 @@ bool Client::connectToServer(gameState& state, std::string serverIP){
 
         if (!receivedPlayerMetadata){
             std::cerr << "Didn't receive the player metadata from the server.\n";
-            return false;
         }
         if (!receivedMapMetadata){
             std::cerr << "Didn't receive the map dimensions from the server.\n";
-            return false;
         }
         if (!receivedMapData){
             std::cerr << "Didn't receive the map data from the server.\n";
-            return false;
         }
         if (!receivedSpritesMetadata){
             std::cerr << "Didn't receive the sprites length data from the server.\n";
-            return false;
         }
         if (!receivedSpritesData){
             std::cerr << "Didn't receive the sprites data from the server.\n";
-            return false;
         }
+
+        return false;
     }
     
     std::cout << "Received all initialisation packets.\n";
@@ -267,31 +286,45 @@ void Client::receiveData(gameState& state, bool& received, bool& shutdown, bool&
             std::vector<uint8_t> buffer(event.packet->dataLength);
             memcpy(buffer.data(), event.packet->data, event.packet->dataLength);
 
-            // Type information must exist in all packets, so its safe to read
-            PacketType type = static_cast<PacketType>(buffer[0]);
+            PacketType type;
+            uint32_t sendID;
+            std::vector<uint8_t> data;
+
+            convertData(buffer, type, sendID, data);
             switch (type){
                 case PACKET_SHUTDOWN: {
-                    std::cout << "The server shut down.\n";
                     enet_packet_destroy(event.packet);
 
                     shutdown = true;
                     return;
                 }
                 case PACKET_KICK: {
-                    std::cout << "You've been kicked from the server.\n";
                     enet_packet_destroy(event.packet);
 
                     kicked = true;
                     return;
                 }
                 case PACKET_DATA: {
+                    // If the sendID is the same as our ID, that means we sent our packet to ourselves, so just discard it
+                    if (sendID == state.player.playerID){
+                        return;
+                    }
+
+                    if (data.size() % sizeof(Network_player) != 0) {
+                        std::cerr << "Corrupted packet: size mismatch\n";
+                        enet_packet_destroy(event.packet);
+                        corruptedData = true;
+                        return;
+                    }
+
                     // Read player data into our vector
-                    int numPlayers = (buffer.size()-1) / sizeof(Network_player);
+                    int numPlayers = data.size() / sizeof(Network_player);
                     std::vector<Network_player> network_allPlayers(numPlayers);
-                    memcpy(network_allPlayers.data(), buffer.data() + 1, buffer.size()-1);
+                    memcpy(network_allPlayers.data(), data.data(), data.size());
 
                     // Organise player data
                     int numOtherPlayers = numPlayers - 1;
+                    if (numOtherPlayers < 0) numOtherPlayers = 0;
                     Network_player network_player;
                     std::vector<Network_player> network_otherPlayers(numOtherPlayers);
 
@@ -352,10 +385,11 @@ void Client::receiveData(gameState& state, bool& received, bool& shutdown, bool&
 
                         state.sprites[state.numSprites + i] = newSprite;
                     }
+
+                    enet_packet_destroy(event.packet);
+                    break;
                 }
             }
-
-            enet_packet_destroy(event.packet);
         }
     }
 }
@@ -374,6 +408,8 @@ void Client::sendData(const Player& player, int playerID){
     p.isMoving = player.isMoving;
     p.animationStep = player.animationStep;
     p.ping = player.ping;
+    p.playerHit = player.playerHit;
+    p.dmgDealt = player.dmgDealt;
     p.health = player.health;
     p.gunFrame = player.gunFrame;
 

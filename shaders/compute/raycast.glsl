@@ -1,4 +1,4 @@
-#version 430 core 
+#version 430 
 
 layout(local_size_x = 256, local_size_y = 1) in;
 
@@ -41,6 +41,14 @@ struct lineData {
     int texture;
 };
 
+struct atlasUV {
+    float x;
+    float y;
+
+    float width;
+    float height;
+};
+
 layout(std430, binding = 0) buffer lineBuf {
     lineData lines[];
 };
@@ -53,14 +61,16 @@ layout(std430, binding = 2) buffer depthBufferBuf {
     float depthBuffer[];
 };
 
+layout(std430, binding = 3) buffer atlasUVBuf {
+    atlasUV atlasUVs[];
+};
+
 uniform uint numLines;       // Number of lines on the map
 uniform vec2 lookDir;        // Look direction of our player (normalized)
 uniform vec2 camera;         // Camera plane vector
 uniform vec2 playerPos;      // Position of the player
 uniform int WINDOW_WIDTH;
 uniform int WINDOW_HEIGHT;
-uniform float texWidth;
-uniform float texHeight;
 
 void main() {
     int x = int(gl_GlobalInvocationID.x);
@@ -139,6 +149,9 @@ void main() {
     vec2 wallEnd   = curLine.p2;
     vec2 wallDir   = wallEnd - wallStart;
     vec2 hitDiff   = closestIntersection - wallStart;
+
+    float texWidth = atlasUVs[curTexture].width;
+    float texHeight = atlasUVs[curTexture].height;
 
     // Fraction along the segment using projection
     float texX = dot(hitDiff, wallDir) / dot(wallDir, wallDir);

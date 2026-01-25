@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <fstream>
+#include <SDL3_image/SDL_image.h>
 #include "time.hpp"
 
 std::string computeFolder = "shaders\\compute";
@@ -40,6 +41,15 @@ struct lineData {
 };
 static_assert(sizeof(lineData) == 24);
 
+struct atlasUV {
+    float x;
+    float y;
+
+    float width;
+    float height;
+};
+static_assert(sizeof(atlasUV) == 16);
+
 struct spriteResult {
     // World attributes
     float spriteScreenX;
@@ -53,9 +63,12 @@ struct spriteResult {
 };
 static_assert(sizeof(spriteResult) == 24);
 
+// The minimum things someones needs for compatibility
+GLint glMinTextureSize = 4096;
+
 // Shaders
 static GLuint computeShader, wallShader, floorShader, ceilingShader, spriteShader, spriteCompShader;
-static GLuint screenShader;
+static GLuint screenShader, atlasShader;
 
 // Metadata
 static int W, H;
@@ -87,11 +100,20 @@ static std::vector<spriteData> spritesData;
 static std::vector<GLint> spriteUnits;
 static int numSprites;
 
-// Textures
-static std::vector<GLuint> glWallTextures;     // Stores the ID of each wall texture
-static std::vector<GLuint> glSpriteTextures;   // Stores the ID of each sprite texture (players too)
-static std::vector<GLuint> glScreenTextures;
-static GLuint playerTextureID = 0;
+// Atlas textures
+static GLuint glWallAtlas = 0;
+static GLuint glSpriteAtlas = 0;
+static GLuint glScreenAtlas = 0;
+
+// Atlas buffers (for the GPU)
+static GLuint glWallUVs = 0;
+static GLuint glSpriteUVs = 0;
+static GLuint glScreenUVs = 0;
+
+// Atlas data (for the CPU)
+static std::vector<atlasUV> wallUVs;
+static std::vector<atlasUV> spriteUVs;
+static std::vector<atlasUV> screenUVs;
 
 // Globals for VAO/VBO/EBO
 static GLuint quadVAO = 0, quadVBO = 0, quadEBO = 0;
@@ -104,34 +126,38 @@ enum shaderType {
     SPRITE
 };
 
+bool checkCompatibility(){
+    GLint maxTextureSize = 0;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
+
+    if (maxTextureSize < glMinTextureSize){
+        std::cout << "GL_MAX_TEXTURE_SIZE: " << maxTextureSize << " is less than the minimum required size: " 
+                  << glMinTextureSize << std::endl;
+
+        return false;
+    }
+
+    return true;
+}
+
 // Set the texture uniforms to the right textures for the map
 void setMapUniforms(GLuint currentShader){
-    glUniform1iv(glGetUniformLocation(currentShader, "textures"), mapUnits.size(), mapUnits.data());
+    glUniform1i(glGetUniformLocation(currentShader, "atlas"), 0);
 }
 
 // Set the texture uniforms to the right textures for the sprites
-void setSpriteUniforms(GLuint currentShader){
-    glUniform1i(glGetUniformLocation(spriteShader, "playerTextures"), 0);
-    glUniform1iv(glGetUniformLocation(currentShader, "spriteTextures"), spriteUnits.size(), spriteUnits.data());
+void setSpriteUniforms(){
+    glUniform1i(glGetUniformLocation(spriteShader, "atlas"), 0);
 }
 
 void activateWallTextures(){
-    for (int i = 0; i < glWallTextures.size(); i++){
-        glActiveTexture(GL_TEXTURE0 + i);
-        glBindTexture(GL_TEXTURE_2D, glWallTextures[i]);
-    }
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, glWallAtlas);
 }
 
 void activateSpriteTextures(){
-    // Player textures
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D_ARRAY, playerTextureID);
-
-    // Sprite textures
-    for (int i = 0; i < glSpriteTextures.size(); i++){
-        glActiveTexture(GL_TEXTURE1 + i);
-        glBindTexture(GL_TEXTURE_2D, glSpriteTextures[i]);
-    }
+    glBindTexture(GL_TEXTURE_2D, glSpriteAtlas);
 }
 
 void getWindowSize(SDL_Window* window){
@@ -177,7 +203,7 @@ void initQuad() {
     glBindVertexArray(0);
 }
 
-void drawTexture(GLuint screenShader, GLuint tex, float r = -1, float g = -1, float b = -1){
+void drawTexture(GLuint tex, float r = -1, float g = -1, float b = -1){
     glUseProgram(screenShader);
 
     glUniform3f(glGetUniformLocation(screenShader, "filterColor"), r, g, b);
@@ -186,6 +212,27 @@ void drawTexture(GLuint screenShader, GLuint tex, float r = -1, float g = -1, fl
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex);
     glUniform1i(glGetUniformLocation(screenShader, "u_tex"), 0); // texture unit 0
+
+    // draw quad
+    glBindVertexArray(quadVAO);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+}
+
+void drawAtlasTexture(GLuint atlas, float atlasRect[4], float r = -1, float g = -1, float b = -1){
+    glUseProgram(atlasShader);
+
+    // bind texture
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, atlas);
+
+    glUniform1i(glGetUniformLocation(atlasShader, "atlas"), 0); // texture unit 0
+    glUniform1f(glGetUniformLocation(atlasShader, "atlasW"), glMinTextureSize);
+    glUniform1f(glGetUniformLocation(atlasShader, "atlasH"), glMinTextureSize);
+    glUniform1f(glGetUniformLocation(atlasShader, "texWidth"), atlasRect[2]);
+    glUniform1f(glGetUniformLocation(atlasShader, "texHeight"), atlasRect[3]);
+    glUniform2f(glGetUniformLocation(atlasShader, "atlasCoord"), atlasRect[0], atlasRect[1]);
+    glUniform3f(glGetUniformLocation(atlasShader, "filterColor"), r, g, b);
 
     // draw quad
     glBindVertexArray(quadVAO);
@@ -214,173 +261,200 @@ bool createOutputTextures(){
     return true;
 }
 
+struct AtlasItem {
+    SDL_Surface* surface;
+    int index;
+};
+
+// Use the shelf-packing algorithm to generate an atlas
+SDL_Surface* generateAtlas(const std::vector<SDL_Surface*>& textures, std::vector<atlasUV>& atlasUVs){
+    float texWidth = glMinTextureSize;
+    float texHeight = glMinTextureSize;
+    SDL_Surface* atlas = SDL_CreateSurface(texWidth, texHeight, SDL_PIXELFORMAT_RGBA32);
+
+    std::vector<AtlasItem> items(textures.size());
+    for (int i = 0; i < textures.size(); i++){
+        items[i].surface = textures[i];
+        items[i].index = i;
+    }
+
+    atlasUVs.resize(textures.size());
+    std::sort(items.begin(), items.end(), [](AtlasItem i1, AtlasItem i2){return i1.surface->h > i2.surface->h;});
+
+    int x = 0;
+    int y = 0;
+    int rowHeight = 0;
+    int padding = 2;
+    for (auto& item : items) {
+        SDL_Surface* surf = item.surface;
+
+        int w = surf->w + padding * 2;
+        int h = surf->h + padding * 2;
+
+        if (x + w > texWidth){
+            x = 0;
+            y += rowHeight;
+            rowHeight = 0;
+        }
+
+        if (y + h > texHeight){
+            std::cout << "Atlas overflow!\n";
+            break;
+        }
+
+        SDL_Rect dst {
+            x + padding,
+            y + padding,
+            surf->w,
+            surf->h
+        };
+
+        SDL_BlitSurface(surf, nullptr, atlas, &dst);
+
+        atlasUVs[item.index] = {
+            float(dst.x) / texWidth,
+            float(dst.y) / texHeight,
+            float(dst.w),
+            float(dst.h)
+        };
+
+        x += w;
+        rowHeight = std::fmax(rowHeight, h);
+    }
+
+    return atlas;
+}
+
 // Only do this once at initalisation
 bool createInputTextures(const gameState& state, int numWallTexs, int numSpriteTexs, int numScreenTexs){
-    // Store the constant arrays into global variables
-    glWallTextures.resize(numWallTexs);
-    mapUnits.resize(numWallTexs);
-
-    glSpriteTextures.resize(numSpriteTexs - 40); // Don't include players
-    spriteUnits.resize(numSpriteTexs - 40);
-
-    glScreenTextures.resize(numScreenTexs);
-
     // Convert the surfaces to the right format that I input to openGL
     std::vector<SDL_Surface*> wallTextures(numWallTexs);
-    for (int i = 0; i < numWallTexs; i++){
-        wallTextures[i] = SDL_ConvertSurface(state.wallTextures[i].texture, SDL_PIXELFORMAT_RGBA32);
-    }
-
     std::vector<SDL_Surface*> spriteTextures(numSpriteTexs);
-    for (int i = 0; i < numSpriteTexs; i++){
-        spriteTextures[i] = SDL_ConvertSurface(state.spriteTextures[i].texture, SDL_PIXELFORMAT_RGBA32);
-    }
-
     std::vector<SDL_Surface*> screenTextures(numScreenTexs);
-    for (int i = 0; i < numScreenTexs; i++){
-        screenTextures[i] = SDL_ConvertSurface(state.screenTextures[i].texture, SDL_PIXELFORMAT_RGBA32);
+
+    for (int i = 0; i < numWallTexs; i++) wallTextures[i] = SDL_ConvertSurface(state.wallTextures[i].texture, SDL_PIXELFORMAT_RGBA32);
+    for (int i = 0; i < numSpriteTexs; i++) spriteTextures[i] = SDL_ConvertSurface(state.spriteTextures[i].texture, SDL_PIXELFORMAT_RGBA32);
+    for (int i = 0; i < numScreenTexs; i++) screenTextures[i] = SDL_ConvertSurface(state.screenTextures[i].texture, SDL_PIXELFORMAT_RGBA32);
+
+    SDL_Surface* wallAtlas = generateAtlas(wallTextures, wallUVs);
+    SDL_Surface* spriteAtlas = generateAtlas(spriteTextures, spriteUVs);
+    SDL_Surface* screenAtlas = generateAtlas(screenTextures, screenUVs);
+
+    // Free the textures
+    for (int i = 0; i < numWallTexs; i++) SDL_DestroySurface(wallTextures[i]);
+    for (int i = 0; i < numSpriteTexs; i++) SDL_DestroySurface(spriteTextures[i]);
+    for (int i = 0; i < numScreenTexs; i++) SDL_DestroySurface(screenTextures[i]);
+
+    if (glWallAtlas != 0) glDeleteTextures(1, &glWallAtlas);
+    if (glSpriteAtlas != 0) glDeleteTextures(1, &glSpriteAtlas);
+    if (glScreenAtlas != 0) glDeleteTextures(1, &glScreenAtlas);
+
+    // Wall atlas
+    glGenTextures(1, &glWallAtlas);
+    glBindTexture(GL_TEXTURE_2D, glWallAtlas);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, wallAtlas->w, wallAtlas->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, wallAtlas->pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    // Sprite atlas
+    glGenTextures(1, &glSpriteAtlas);
+    glBindTexture(GL_TEXTURE_2D, glSpriteAtlas);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, spriteAtlas->w, spriteAtlas->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, spriteAtlas->pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    // Screen atlas
+    glGenTextures(1, &glScreenAtlas);
+    glBindTexture(GL_TEXTURE_2D, glScreenAtlas);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, screenAtlas->w, screenAtlas->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, screenAtlas->pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    if (glWallAtlas == 0){
+        std::cout << "Failed to load input textures.\n";
+        return false;
+    }
+    if (glSpriteAtlas == 0){
+        std::cout << "Failed to load input textures.\n";
+        return false;
+    }
+    if (glScreenAtlas == 0){
+        std::cout << "Failed to load input textures.\n";
+        return false;
     }
 
-    // Wall textures
-    for (int i = 0; i < wallTextures.size(); i++){
-        if (glWallTextures[i] != 0) glDeleteTextures(1, &glWallTextures[i]);
-
-        glGenTextures(1, &glWallTextures[i]);
-        glBindTexture(GL_TEXTURE_2D, glWallTextures[i]);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, wallTextures[i]->w, wallTextures[i]->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, 
-                     wallTextures[i]->pixels);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-        if (glWallTextures[i] == 0){
-            std::cout << "Failed to load input textures.\n";
-            return false;
-        }
-
-        mapUnits[i] = i;
-    }
-
-    // Sprite textures
-    // Player textures
-    if (playerTextureID != 0) glDeleteTextures(1, &playerTextureID);
-
-    glGenTextures(1, &playerTextureID);
-    glBindTexture(GL_TEXTURE_2D_ARRAY, playerTextureID);
-    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, 64, 64, 40, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    for (int i = 0; i < 40; i++){
-        glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, i, 64, 64, 1, GL_RGBA, GL_UNSIGNED_BYTE, spriteTextures[i]->pixels);
-    }
-
-    // Normal sprites
-    for (int i = 0; i < spriteTextures.size() - 40; i++){
-        if (glSpriteTextures[i] != 0) glDeleteTextures(1, &glSpriteTextures[i]);
-
-        glGenTextures(1, &glSpriteTextures[i]);
-        glBindTexture(GL_TEXTURE_2D, glSpriteTextures[i]);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, spriteTextures[40 + i]->w, spriteTextures[40 + i]->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, 
-                     spriteTextures[40 + i]->pixels);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-        if (glSpriteTextures[i] == 0){
-            std::cout << "Failed to load input textures.\n";
-            return false;
-        }
-
-        // Bind to the 1st, 2nd, 3nd etc texture units, because the 0th unit is bound to the player texture array
-        spriteUnits[i] = i+1;
-    }
-
-    // Create the screen textures
-    for (int i = 0; i < screenTextures.size(); i++){
-        if (glScreenTextures[i] != 0) glDeleteTextures(1, &glScreenTextures[i]);
-
-        glGenTextures(1, &glScreenTextures[i]);
-        glBindTexture(GL_TEXTURE_2D, glScreenTextures[i]);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, screenTextures[i]->w, screenTextures[i]->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, 
-                     screenTextures[i]->pixels);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-        if (glScreenTextures[i] == 0){
-            std::cout << "Failed to load input textures.\n";
-            return false;
-        }
-    }
     return true;
 }
 
-// GENERATE TEXTURES FOR WALL, FLOOR AND CEILING SHADER
-void generateMapTextures(std::string& wallStr, std::string& floorStr, std::string& ceilingStr, int numTextures){
-    if (numTextures == 0) numTextures = 1;
+// // GENERATE TEXTURES FOR WALL, FLOOR AND CEILING SHADER
+// void generateMapTextures(std::string& wallStr, std::string& floorStr, std::string& ceilingStr, int numTextures){
+//     if (numTextures == 0) numTextures = 1;
 
-    // The length of a tab
-    std::string tab = "    ";
+//     // The length of a tab
+//     std::string tab = "    ";
 
-    // Insert the uniforms into every string first
-    std::string arrSize = std::to_string(numTextures);
-    std::string uniforms = "uniform sampler2D textures[" + arrSize + "];";
+//     // Insert the uniforms into every string first
+//     std::string arrSize = std::to_string(numTextures);
+//     std::string uniforms = "uniform sampler2D textures[" + arrSize + "];";
 
-    // Search for the identifier "// UNIFORMS""
-    std::string uniformID = "// UNIFORMS\n";
+//     // Search for the identifier "// UNIFORMS""
+//     std::string uniformID = "// UNIFORMS\n";
 
-    // Find positions
-    int wallUniform = wallStr.find(uniformID) + uniformID.length();
-    int floorUniform = floorStr.find(uniformID) + uniformID.length();
-    int ceilingUniform = ceilingStr.find(uniformID) + uniformID.length();
+//     // Find positions
+//     int wallUniform = wallStr.find(uniformID) + uniformID.length();
+//     int floorUniform = floorStr.find(uniformID) + uniformID.length();
+//     int ceilingUniform = ceilingStr.find(uniformID) + uniformID.length();
 
-    // Insert into the right place
-    wallStr.insert(wallUniform, uniforms);
-    floorStr.insert(floorUniform, uniforms);
-    ceilingStr.insert(ceilingUniform, uniforms);
+//     // Insert into the right place
+//     wallStr.insert(wallUniform, uniforms);
+//     floorStr.insert(floorUniform, uniforms);
+//     ceilingStr.insert(ceilingUniform, uniforms);
 
-    {
-        std::ofstream file(computeFolder + "\\wallChanged.glsl");
-        file.write(wallStr.c_str(), wallStr.size());
+//     {
+//         std::ofstream file(computeFolder + "\\wallChanged.glsl");
+//         file.write(wallStr.c_str(), wallStr.size());
 
-        file.close();
-    }
-    {
-        std::ofstream file(computeFolder + "\\floorChanged.glsl");
-        file.write(floorStr.c_str(), floorStr.size());
+//         file.close();
+//     }
+//     {
+//         std::ofstream file(computeFolder + "\\floorChanged.glsl");
+//         file.write(floorStr.c_str(), floorStr.size());
 
-        file.close();
-    }
-    {
-        std::ofstream file(computeFolder + "\\ceilingChanged.glsl");
-        file.write(ceilingStr.c_str(), ceilingStr.size());
+//         file.close();
+//     }
+//     {
+//         std::ofstream file(computeFolder + "\\ceilingChanged.glsl");
+//         file.write(ceilingStr.c_str(), ceilingStr.size());
 
-        file.close();
-    }
-}
+//         file.close();
+//     }
+// }
 
-// GENERATE TEXTURES FOR SPRITE SHADER
-void generateSpriteTextures(std::string& spriteStr, int numTextures){
-    if (numTextures == 0) numTextures = 1;
+// // GENERATE TEXTURES FOR SPRITE SHADER
+// void generateSpriteTextures(std::string& spriteStr, int numTextures){
+//     if (numTextures == 0) numTextures = 1;
 
-    // The length of a tab
-    std::string tab = "    ";
+//     // The length of a tab
+//     std::string tab = "    ";
 
-    // Insert the uniforms into every string first
-    std::string arrSize = std::to_string(numTextures);
-    std::string uniforms = "uniform sampler2D spriteTextures[" + arrSize + "];";
+//     // Insert the uniforms into every string first
+//     std::string arrSize = std::to_string(numTextures);
+//     std::string uniforms = "uniform sampler2D spriteTextures[" + arrSize + "];";
 
-    // Search for the identifier "// UNIFORMS"
-    std::string uniformID = "// UNIFORMS\n";
+//     // Search for the identifier "// UNIFORMS"
+//     std::string uniformID = "// UNIFORMS\n";
 
-    // Find positions
-    int spriteUniform = spriteStr.find(uniformID) + uniformID.length();
+//     // Find positions
+//     int spriteUniform = spriteStr.find(uniformID) + uniformID.length();
 
-    // Insert into the right place
-    spriteStr.insert(spriteUniform, uniforms);
+//     // Insert into the right place
+//     spriteStr.insert(spriteUniform, uniforms);
 
-    std::ofstream file(computeFolder + "\\spritesChanged.glsl");
-    file.write(spriteStr.c_str(), spriteStr.size());
+//     std::ofstream file(computeFolder + "\\spritesChanged.glsl");
+//     file.write(spriteStr.c_str(), spriteStr.size());
 
-    file.close();
-}
+//     file.close();
+// }
 
 int calculatePlayerTexIndex(Player& otherPlayer, const gameState& state){
     Vector spriteDir = otherPlayer.lookDir.normalize();
@@ -445,7 +519,7 @@ void fillSpriteArrays(const gameState& state){
             spritesData[i].invisColor[1] = 0.0f / 255.0f;
             spritesData[i].invisColor[2] = 0.0f / 255.0f;
 
-            spritesData[i].texture = state.sprites[i].texture;
+            spritesData[i].texture = 40 + state.sprites[i].texture;
 
             spritesData[i].width = curTex.width;
             spritesData[i].height = curTex.height;
@@ -456,7 +530,7 @@ void fillSpriteArrays(const gameState& state){
 
 void initBuffers(){
     std::vector<GLuint*> buffers = {&glMapLinesData, &glMapColumnsData, &glMapDepthBuf, &glSpritesData, &glSpriteSortedIndexes, 
-                                    &glSpriteBoundingBoxes, &glSpriteResults};
+                                    &glSpriteBoundingBoxes, &glSpriteResults, &glWallUVs, &glSpriteUVs, &glScreenUVs};
 
     for (int i = 0; i < buffers.size(); i++){
         if (*(buffers[i]) != 0) glDeleteBuffers(1, buffers[i]);
@@ -467,6 +541,8 @@ void initBuffers(){
 
 // Called once at initialisation
 int initShaders(SDL_Window* window, const gameState& state){
+    if (!checkCompatibility()) return -1;
+
     // Resize the window
     getWindowSize(window);
     int numWallTexs = state.wallTextures.size();
@@ -480,9 +556,9 @@ int initShaders(SDL_Window* window, const gameState& state){
     std::string ceilingStr = LoadFile(computeFolder + "\\ceiling.glsl");
     std::string spriteStr = LoadFile(computeFolder + "\\sprites.glsl");
 
-    // Changes the source code of the .glsl files, so that multiple textures can be rendered
-    generateMapTextures(wallStr, floorStr, ceilingStr, numWallTexs);
-    generateSpriteTextures(spriteStr, numSpriteTexs - 40); // Don't include player textures
+    // // Changes the source code of the .glsl files, so that multiple textures can be rendered
+    // generateMapTextures(wallStr, floorStr, ceilingStr, numWallTexs);
+    // generateSpriteTextures(spriteStr, numSpriteTexs - 40); // Don't include player textures
 
     // Initialize the rendering output
     initQuad();
@@ -513,11 +589,14 @@ int initShaders(SDL_Window* window, const gameState& state){
     }
 
     // Render textures on the screen
-    std::string screen_frag = LoadFile(fragmentFolder + "\\screen.frag");
-    std::string screen_vert = LoadFile(vertexFolder + "\\screen.vert");
-    screenShader = CreateProgram(CompileShader(screen_vert, GL_VERTEX_SHADER), CompileShader(screen_frag, GL_FRAGMENT_SHADER));
+    screenShader = CreateProgram(CompileShader(LoadFile(vertexFolder + "\\screen.vert"), GL_VERTEX_SHADER), 
+                                 CompileShader(LoadFile(fragmentFolder + "\\screen.frag"), GL_FRAGMENT_SHADER));
+
+    atlasShader = CreateProgram(CompileShader(LoadFile(vertexFolder + "\\atlas.vert"), GL_VERTEX_SHADER), 
+                                CompileShader(LoadFile(fragmentFolder + "\\atlas.frag"), GL_FRAGMENT_SHADER));
 
     if (screenShader == 0) return -1;
+    if (atlasShader == 0) return -1;
 
     // Create the GPU arrays
     // Map arrays
@@ -603,14 +682,16 @@ void dispatchShader(shaderType type, const gameState& state){
         glBufferData(GL_SHADER_STORAGE_BUFFER, W * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, glMapDepthBuf);
 
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, glWallUVs);
+        glBufferData(GL_SHADER_STORAGE_BUFFER, wallUVs.size() * sizeof(atlasUV), wallUVs.data(), GL_DYNAMIC_DRAW);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, glWallUVs);
+
         glUniform1ui(glGetUniformLocation(computeShader, "numLines"), (unsigned int)(numLines));
         glUniform2f(glGetUniformLocation(computeShader, "lookDir"), lookDir.x, lookDir.y);
         glUniform2f(glGetUniformLocation(computeShader, "camera"), camera.x, camera.y);
         glUniform2f(glGetUniformLocation(computeShader, "playerPos"), playerPosition.x, playerPosition.y);
         glUniform1i(glGetUniformLocation(computeShader, "WINDOW_WIDTH"), W);
         glUniform1i(glGetUniformLocation(computeShader, "WINDOW_HEIGHT"), H);
-        glUniform1f(glGetUniformLocation(computeShader, "texWidth"), 64);
-        glUniform1f(glGetUniformLocation(computeShader, "texHeight"), 64);
 
         int groupsX = (W + 255) / 256;
         glDispatchCompute(groupsX, 1, 1);
@@ -625,9 +706,14 @@ void dispatchShader(shaderType type, const gameState& state){
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, glMapColumnsData);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, glMapColumnsData);
 
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, glWallUVs);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, glWallUVs);
+
         // Set the texture related uniforms
         setMapUniforms(wallShader);
 
+        glUniform1ui(glGetUniformLocation(wallShader, "atlasW"), glMinTextureSize);
+        glUniform1ui(glGetUniformLocation(wallShader, "atlasH"), glMinTextureSize);
         glUniform1i(glGetUniformLocation(wallShader, "WINDOW_WIDTH"), W);
         glUniform1i(glGetUniformLocation(wallShader, "WINDOW_HEIGHT"), H);
         glUniform1f(glGetUniformLocation(wallShader, "texWidth"), 64);
@@ -697,8 +783,15 @@ void dispatchShader(shaderType type, const gameState& state){
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, glSpriteResults); 
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, glSpriteResults);
 
-        setSpriteUniforms(spriteShader);
+        // Atlas UVs (1 atlasUV struct)
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, glSpriteUVs);
+        glBufferData(GL_SHADER_STORAGE_BUFFER, spriteUVs.size() * sizeof(atlasUV), spriteUVs.data(), GL_DYNAMIC_DRAW);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, glSpriteUVs);
 
+        setSpriteUniforms();
+
+        glUniform1ui(glGetUniformLocation(spriteShader, "atlasW"), glMinTextureSize);        
+        glUniform1ui(glGetUniformLocation(spriteShader, "atlasH"), glMinTextureSize);
         glUniform1ui(glGetUniformLocation(spriteShader, "numSprites"), numSprites);
         glUniform2f(glGetUniformLocation(spriteShader, "lookDir"), lookDir.x, lookDir.y);
         glUniform2f(glGetUniformLocation(spriteShader, "camera"), camera.x, camera.y);
@@ -723,9 +816,14 @@ void dispatchShader(shaderType type, const gameState& state){
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, glMapColumnsData);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, glMapColumnsData);
 
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, glWallUVs);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, glWallUVs);
+
         // Set the texture related uniforms
         setMapUniforms(currentShader);
 
+        glUniform1ui(glGetUniformLocation(currentShader, "atlasW"), glMinTextureSize);
+        glUniform1ui(glGetUniformLocation(currentShader, "atlasH"), glMinTextureSize);
         glUniform2f(glGetUniformLocation(currentShader, "lookDir"), lookDir.x, lookDir.y);
         glUniform2f(glGetUniformLocation(currentShader, "camera"), camera.x, camera.y);
         glUniform2f(glGetUniformLocation(currentShader, "playerPos"), playerPosition.x, playerPosition.y);
@@ -763,10 +861,17 @@ void renderMap(SDL_Window* window, const gameState& state){
     // Ensure writes are visible
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
-    drawTexture(screenShader, outputTex);
+    drawTexture(outputTex);
 
     // if the gunFrame is -1, that means no gun is equipped
     if (state.player.gunType != -1){
-        drawTexture(screenShader, glScreenTextures[state.player.gunFrame], 152.0f/255.0f, 0.0f/255.0f, 136.0f/255.0f);
+        float atlasRect[4] = {
+            screenUVs[state.player.gunFrame].x, 
+            screenUVs[state.player.gunFrame].y,
+            screenUVs[state.player.gunFrame].width,
+            screenUVs[state.player.gunFrame].height
+        };
+
+        drawAtlasTexture(glScreenAtlas, atlasRect, 152.0f/255.0f, 0.0f/255.0f, 136.0f/255.0f);
     }
 }

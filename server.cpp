@@ -60,7 +60,8 @@ struct Network_player {
     uint32_t playerID;
     char username[32];
 
-    double ping;
+    float ping;
+    float dmgDealt;
 
     // Player data
     float posX;
@@ -71,12 +72,13 @@ struct Network_player {
     // Animation related data
     uint8_t isMoving;
     uint8_t animationStep;
-
-    // Only send the health to the other client and the gun frame, so they can change their health and also render our player
-    int8_t health;
     int8_t gunFrame;
+
+    // Send which player we hit, then the server sends back their health
+    int8_t playerHit;
+    int8_t health;
 };
-static_assert(sizeof(Network_player) == 72);
+static_assert(sizeof(Network_player) == 68);
 
 // These two arrays are synchronised, but they server different purposes
 std::vector<Network_player> players;
@@ -95,11 +97,15 @@ struct sprite {
 };
 
 // Append the type information to the front of the packet, length must be specified in bytes
-std::vector<uint8_t> convertData(PacketType type, void* ptr, size_t length){
-    std::vector<uint8_t> buffer(1 + length);
+std::vector<uint8_t> convertData(PacketType type, uint32_t sendID, void* ptr, size_t length){
+    int segment1Size = sizeof(uint8_t);
+    int segment2Size = sizeof(uint32_t);
 
-    buffer[0] = static_cast<uint8_t>(type);
-    memcpy(buffer.data() + 1, ptr, length);
+    std::vector<uint8_t> buffer(segment1Size + segment2Size + length);
+
+    memcpy(buffer.data(), &type, segment1Size);
+    memcpy(buffer.data() + segment1Size, &sendID, segment2Size);
+    memcpy(buffer.data() + segment1Size + segment2Size, ptr, length);
 
     return buffer;
 }
@@ -268,7 +274,7 @@ void kickPlayer(ENetHost* server, const std::string& username){
     }
 
     // Send a kick packet to this player
-    std::vector<uint8_t> buffer = convertData(PACKET_KICK, nullptr, 0);
+    std::vector<uint8_t> buffer = convertData(PACKET_KICK, 0, nullptr, 0);
     ENetPeer* playerToKick = peerData[index];
     ClientData* playerData = static_cast<ClientData*>(playerToKick->data);
 
@@ -360,6 +366,16 @@ void readInput(ENetHost* server, std::string& input){
     }
 }
 
+void resolveShot(Network_player& p){
+    if (p.playerHit != -1){
+        // Change the other player's health
+        players[p.playerHit].health -= p.dmgDealt;
+        if (players[p.playerHit].health <= 0){
+            players[p.playerHit].health = 100;
+        }
+    }
+}
+
 int main(int argc, char* argv[]){
     if (enet_initialize() < 0){
         std::cerr << "Couldn't initialize enet!\n";
@@ -430,6 +446,7 @@ int main(int argc, char* argv[]){
                     // Add him to our players array
                     Network_player newPlayer{};
                     newPlayer.playerID = playerID;
+                    newPlayer.health = 100;
                     players.push_back(newPlayer);
                     peerData.push_back(event.peer);
                     numPlayers++;
@@ -466,7 +483,7 @@ int main(int argc, char* argv[]){
 
                     ENetPeer* peer = event.peer;
                     auto sendData = [peer](PacketType type, void* data, size_t length){
-                        std::vector<uint8_t> buffer = convertData(type, data, length);
+                        std::vector<uint8_t> buffer = convertData(type, 0, data, length);
                         ENetPacket* sendPacket = enet_packet_create(buffer.data(), buffer.size(), ENET_PACKET_FLAG_RELIABLE);
                         enet_peer_send(peer, 0, sendPacket);
                     };
@@ -482,21 +499,28 @@ int main(int argc, char* argv[]){
                     break;
                 }
                 case ENET_EVENT_TYPE_RECEIVE: {
+                    ClientData* cData = static_cast<ClientData*>(event.peer->data);
+
                     // Assume the client sent their player information
                     if (event.packet->dataLength != sizeof(Network_player)) break;
                     Network_player curPlayer;
                     memcpy(&curPlayer, event.packet->data, sizeof(Network_player));
 
                     // The player we have to change isn't necessary the player the event.peer client has, so calculate it
-                    int playerID = curPlayer.playerID;
-                    int index = findPlayerID(playerID);
+                    int index = findPlayerID(curPlayer.playerID);
                     if (index == -1) break;
+
+                    resolveShot(curPlayer);
+
+                    // Don't change the health
+                    int prevHealth = players[index].health;
 
                     // Store on the server side for easy access
                     players[index] = curPlayer;
+                    players[index].health = prevHealth;
 
                     // Convert our data
-                    std::vector<uint8_t> buffer = convertData(PACKET_DATA, players.data(), players.size() * sizeof(Network_player));
+                    std::vector<uint8_t> buffer = convertData(PACKET_DATA, cData->playerID, players.data(), players.size() * sizeof(Network_player));
 
                     // Broadcast to all clients
                     ENetPacket* packet = enet_packet_create(buffer.data(), buffer.size(), ENET_PACKET_FLAG_RELIABLE);
@@ -531,7 +555,7 @@ int main(int argc, char* argv[]){
                         event.peer->data = nullptr;
                     }
 
-                    std::vector<uint8_t> buffer = convertData(PACKET_DATA, players.data(), players.size() * sizeof(Network_player));
+                    std::vector<uint8_t> buffer = convertData(PACKET_DATA, cData->playerID, players.data(), players.size() * sizeof(Network_player));
 
                     // Send the updated players array to every client so that they're immediately updated
                     ENetPacket* packet = enet_packet_create(buffer.data(), buffer.size(), ENET_PACKET_FLAG_RELIABLE);
@@ -547,7 +571,7 @@ int main(int argc, char* argv[]){
     std::cout << "Destroying the server." << std::endl;
 
     // Broadcast a disconnect message
-    std::vector<uint8_t> shutdownMsg = convertData(PACKET_SHUTDOWN, nullptr, 0);
+    std::vector<uint8_t> shutdownMsg = convertData(PACKET_SHUTDOWN, 0, nullptr, 0);
 
     ENetPacket* packet = enet_packet_create(shutdownMsg.data(), shutdownMsg.size(), ENET_PACKET_FLAG_RELIABLE);
     enet_host_broadcast(server, 0, packet);

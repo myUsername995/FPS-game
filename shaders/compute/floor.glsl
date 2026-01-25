@@ -1,4 +1,4 @@
-#version 430 core 
+#version 430 
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
@@ -8,14 +8,27 @@ struct columnData {
     int texture;
 };
 
+struct atlasUV {
+    float x;
+    float y;
+
+    float width;
+    float height;
+};
+
 layout(std430, binding = 0) buffer columnBuf {
     columnData columns[];
 };
 
+layout(std430, binding = 1) buffer atlasBuf {
+    atlasUV atlasUVs[];
+};
+
 layout(binding = 0, rgba8) writeonly uniform image2D outImage;  // Output image
 
-// UNIFORMS
-
+uniform sampler2D atlas;
+uniform uint atlasW;
+uniform uint atlasH;
 uniform vec2 lookDir;        // Look direction of our player (normalized)
 uniform vec2 camera;         // Camera plane vector
 uniform vec2 playerPos;      // Position of the player
@@ -64,8 +77,15 @@ void main() {
     floorPos += floorStep * float(x);
 
     uint textureIdx = 3;
-    vec2 texCoord = fract(floorPos);
-    vec4 color = texture(textures[textureIdx], texCoord);
+    atlasUV atlasRect = atlasUVs[textureIdx];
+    vec2 atlasCoord = vec2(atlasRect.x, atlasRect.y);
+
+    vec2 texCoord = fract(floorPos); // Coordinates in local texture space
+    // Convert to atlas space
+    texCoord.x = (texCoord.x * atlasRect.width) / float(atlasW);
+    texCoord.y = (texCoord.y * atlasRect.height) / float(atlasH);
+
+    vec4 color = texture(atlas, atlasCoord + texCoord);
 
     imageStore(outImage, ivec2(x, y), color);
 }

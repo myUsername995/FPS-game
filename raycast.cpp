@@ -461,8 +461,11 @@ void renderPlayerNames(const std::string& fontName, const gameState& state){
         SDL_FRect headBox = calculatePlayerHead(state, i, tempFont, isOnScreen);
         if (!isOnScreen) continue;
 
-        // Draw a rectangle
-        GPURenderRect(headBox, {64, 64, 64, 127}, true);
+        // Draw a rectangle with a width thats proportional to the player's health
+        SDL_FRect healthBox = headBox;
+        healthBox.w = healthBox.w * state.otherPlayers[i].health / 100;
+
+        GPURenderRect(healthBox, {168, 0, 0, 127}, true);
 
         // Create a new sized font
         GPURenderText(tempFont.normal, state.otherPlayers[i].username, {headBox.x, headBox.y}, {255, 255, 255, 255});
@@ -471,8 +474,8 @@ void renderPlayerNames(const std::string& fontName, const gameState& state){
     deleteFont(tempFont);
 }
 
-// Calculate which player was hit, damage them, and return the player
-Player* resolveShot(gameState& state){
+// Calculate which player was hit and send to the server to resolve
+void calculateShot(gameState& state, int& hitIdx, float& dmgDealt){
     // The closest player to us gets shot (even if there are multiple hits)
     double closestHit = INFINITY;
     int hitIndex = -1;
@@ -494,20 +497,18 @@ Player* resolveShot(gameState& state){
         double distance = point.length();
         if (distance < closestHit){
             closestHit = distance;
-            hitIndex = i;
+            hitIndex = enemy.playerID;
         }
     }
 
-    // No player was hit 
-    if (hitIndex == -1) return NULL;
-
-    // Change the other player's health
-    float damageDealt = guns[state.player.gunType].damage;
-    Player* hitPlayer = &state.otherPlayers[hitIndex];
-
-    hitPlayer->health -= damageDealt;
-
-    return hitPlayer;
+    if (state.player.gunType != -1){
+        gunAttributes gun = guns[state.player.gunType];
+        dmgDealt = gun.damage;
+    }
+    else {
+        dmgDealt = 0;
+    }
+    hitIdx = hitIndex;
 }
 
 int main(int argc, char* argv[]){
@@ -736,26 +737,23 @@ int main(int argc, char* argv[]){
         bool leftMouseDown = mouse & SDL_BUTTON_MASK(SDL_BUTTON_LEFT);
         bool leftMousePressed = leftMouseDown && !prevLeftMouseDown;
 
-        gunAttributes gun = guns[state.player.gunType];
-        bool canShoot =
-            gunShootAccumulate >= gun.shootSpeed && (
-            (gun.fullAuto && leftMouseDown) ||     // hold to shoot
-            (!gun.fullAuto && leftMousePressed)    // click to shoot
-        );
+        state.player.playerHit = -1;
+        if (state.player.gunType != -1){
+            gunAttributes gun = guns[state.player.gunType];
+            bool canShoot =
+                gunShootAccumulate >= gun.shootSpeed && (
+                (gun.fullAuto && leftMouseDown) ||     // hold to shoot
+                (!gun.fullAuto && leftMousePressed)    // click to shoot
+            );
 
-        // Shooting with a gun
-        Player* playerHit = NULL;
-        if (canShoot){
-            state.player.fired = true;
+            // Shooting with a gun
+            if (canShoot){
+                state.player.fired = true;
 
-            gunShootAccumulate = 0;
-            gunAnimationAccumulate = 0;
+                gunShootAccumulate = 0;
+                gunAnimationAccumulate = 0;
 
-            playerHit = resolveShot(state);
-
-            if (playerHit){
-                // Send this player data to the server (which will send it to the client so he can realise he's been shot)
-                connection.sendData(*playerHit, playerHit->playerID);
+                calculateShot(state, state.player.playerHit, state.player.dmgDealt);
             }
         }
 
@@ -813,6 +811,10 @@ int main(int argc, char* argv[]){
         bool packetReceived, packetShutdown, packetKicked, packetCorruptedData;
         connection.receiveData(state, packetReceived, packetShutdown, packetKicked, packetCorruptedData);
 
+        if (packetShutdown) std::cout << "The server shut down.\n";
+        if (packetKicked) std::cout << "You've been kicked from the server.\n";
+        if (packetCorruptedData) std::cout << "The data sent from the server got corrupted.\n";
+
         if (packetShutdown || packetKicked || packetCorruptedData) return 0;
 
         if (packetReceived){
@@ -833,13 +835,11 @@ int main(int argc, char* argv[]){
 
         SDL_FRect rect = GPURenderText(arial.normal, "FPS: " + std::to_string(FPS), {10, 10}, {255, 255, 255, 255});
 
-        std::string pUsername = "";
-        if (playerHit){
-            pUsername = playerHit->username;
-        }
+        rect.y += rect.h + 10;
+        rect = GPURenderText(arial.normal, "Health: " + std::to_string(state.player.health), {rect.x, rect.y}, {255, 255, 255, 255});
 
         rect.y += rect.h + 10;
-        rect = GPURenderText(arial.normal, "Hit: " + pUsername, {rect.x, rect.y}, {255, 255, 255, 255});
+        rect = GPURenderText(arial.normal, "Hit: " + std::to_string(state.player.playerHit), {rect.x, rect.y}, {255, 255, 255, 255});
 
         SDL_GL_SwapWindow(window);
 

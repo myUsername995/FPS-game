@@ -90,12 +90,15 @@ class Player {
         bool isMoving = false;
         int animationStep = 0;
 
+        float dmgDealt;
+        int playerHit = -1;
         int health = 100;
+
         int gunFrame = 0;
         int gunType = -1;        // 0 -> pistol 1 -> bigger gun thingy
         bool fired;
 
-        double ping;
+        float ping;
 };
 
 struct Sprite {

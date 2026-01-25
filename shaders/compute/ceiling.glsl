@@ -1,4 +1,4 @@
-#version 430 core 
+#version 430 
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
@@ -8,14 +8,27 @@ struct columnData {
     int texture;
 };
 
+struct atlasUV {
+    float x;
+    float y;
+
+    float width;
+    float height;
+};
+
 layout(std430, binding = 0) buffer columnBuf {
     columnData columns[];
 };
 
+layout(std430, binding = 1) buffer atlasBuf {
+    atlasUV atlasUVs[];
+};
+
 layout(binding = 0, rgba8) writeonly uniform image2D outImage;  // Output image
 
-// UNIFORMS
-
+uniform sampler2D atlas;
+uniform uint atlasW;
+uniform uint atlasH;
 uniform vec2 lookDir;        // Look direction of our player (normalized)
 uniform vec2 camera;         // Camera plane vector
 uniform vec2 playerPos;      // Position of the player
@@ -55,17 +68,24 @@ void main() {
     float p = y - (WINDOW_HEIGHT / 2);
     float rowDistance = (WINDOW_HEIGHT / 2) / p;
 
-    vec2 floorStep = vec2(rowDistance * (rayDirX1 - rayDirX0) / WINDOW_WIDTH,
+    vec2 ceilStep = vec2(rowDistance * (rayDirX1 - rayDirX0) / WINDOW_WIDTH,
                             rowDistance * (rayDirY1 - rayDirY0) / WINDOW_WIDTH);
 
-    vec2 floorPos = vec2(playerPos.x + rowDistance * rayDirX0,
+    vec2 ceilPos = vec2(playerPos.x + rowDistance * rayDirX0,
                             playerPos.y + rowDistance * rayDirY0);
 
-    floorPos += floorStep * float(x);
+    ceilPos += ceilStep * float(x);
 
     uint textureIdx = 6;
-    vec2 texCoord = fract(floorPos);
-    vec4 color = texture(textures[textureIdx], texCoord);
+    atlasUV atlasRect = atlasUVs[textureIdx];
+    vec2 atlasCoord = vec2(atlasRect.x, atlasRect.y);
+
+    vec2 texCoord = fract(ceilPos); // Coordinates in local texture space
+    // Convert to atlas space
+    texCoord.x = (texCoord.x * atlasRect.width) / float(atlasW);
+    texCoord.y = (texCoord.y * atlasRect.height) / float(atlasH);
+
+    vec4 color = texture(atlas, atlasCoord + texCoord);
 
     imageStore(outImage, ivec2(x, y), color);
 }

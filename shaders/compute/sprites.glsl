@@ -25,6 +25,14 @@ struct spriteResult {
     float spriteTexHeight;
 };
 
+struct atlasUV {
+    float x;
+    float y;
+
+    float width;
+    float height;
+};
+
 layout(std430, binding = 0) buffer spriteBuf {
     spriteData sprites[];
 };
@@ -46,16 +54,15 @@ layout(std430, binding = 4) buffer spriteResultsbuf {
     spriteResult spriteResults[];
 };
 
+layout(std430, binding = 5) buffer atlasBuf {
+    atlasUV atlasUVs[];
+};
+
 layout (rgba8, binding = 0) writeonly uniform image2D outImage;
 
-// 0 - 32 -> playerRunTextures
-// 32 - 40 -> playerTextures
-// spriteTextures -> different array
-
-// UNIFORMS
-
-uniform sampler2DArray playerTextures;
-
+uniform sampler2D atlas;
+uniform uint atlasW;
+uniform uint atlasH;
 uniform vec2 playerPos;
 uniform vec2 lookDir;
 uniform vec2 camera;
@@ -69,15 +76,6 @@ void main() {
 
     if (x >= WINDOW_WIDTH){
         return;
-    }
-
-    for (int i = 0; i < 20; i++){
-        if (mod(i, 5) == 0){
-            //imageStore(outImage, ivec2(int(x), int(i * 10)), vec4(1,0,0,1));
-        }
-        else {
-            //imageStore(outImage, ivec2(int(x), int(i * 10)), vec4(0,1,0,1));
-        }
     }
 
     for (int i = 0; i < numSprites; i++){
@@ -108,18 +106,15 @@ void main() {
                 int texX = int((x + spriteWidth / 2 - spriteScreenX) * spriteTexWidth / spriteWidth);
                 int texY = int((((y - WINDOW_HEIGHT / 2 + spriteHeight / 2) * spriteTexHeight) / spriteHeight));
 
+                atlasUV atlasRect = atlasUVs[textureIdx];
+                vec2 atlasCoord = vec2(atlasRect.x, atlasRect.y);
+
                 // Load the color from the image based on the previously set attributes
                 vec2 texCoord;
-                texCoord.x = float(texX) / float(spriteTexWidth);
-                texCoord.y = float(texY) / float(spriteTexHeight);
+                texCoord.x = float(texX) / float(atlasW);
+                texCoord.y = float(texY) / float(atlasH);
 
-                vec4 color;
-                if (sprite.isPlayer == 0){
-                    color = texture(spriteTextures[textureIdx], texCoord);
-                }
-                else {
-                    color = texture(playerTextures, vec3(texCoord.xy, textureIdx));
-                }
+                vec4 color = texture(atlas, atlasCoord + texCoord);
                 
                 // Don't draw if its an invisible color
                 if (!(color.x == invisColor.x && color.y == invisColor.y && color.z == invisColor.z)){
